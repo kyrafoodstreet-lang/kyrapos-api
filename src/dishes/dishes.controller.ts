@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, Req } from '@nestjs/common';
 import { DishesService } from './dishes.service';
-import { CreateDishDto, UpdateDishDto } from './dto/dishes.dto';
+import { CreateDishDto, UpdateDishDto, BulkImportMenuDto } from './dto/dishes.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -51,6 +51,12 @@ export class DishesController {
     return { url };
   }
 
+  @Post('bulk-import')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  async bulkImport(@Body() dto: BulkImportMenuDto) {
+    return this.dishesService.bulkImportMenu(dto);
+  }
+
   @Post()
   @Roles(Role.ADMIN, Role.MANAGER)
   async create(@Body() dto: CreateDishDto) {
@@ -69,3 +75,4 @@ export class DishesController {
     return this.dishesService.remove(id);
   }
 }
+

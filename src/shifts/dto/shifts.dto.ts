@@ -8,20 +8,24 @@ export class OpenShiftDto {
 
 export class CloseShiftDto {
   @IsNumber()
+  @IsOptional()
   @Min(0)
-  closingCashSales!: number;
+  closingCashSales?: number;
 
   @IsNumber()
+  @IsOptional()
   @Min(0)
-  closingCardSales!: number;
+  closingCardSales?: number;
 
   @IsNumber()
+  @IsOptional()
   @Min(0)
-  closingUpiSales!: number;
+  closingUpiSales?: number;
 
   @IsNumber()
+  @IsOptional()
   @Min(0)
-  closingExpenses!: number;
+  closingExpenses?: number;
 
   @IsNumber()
   @Min(0)
