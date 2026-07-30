@@ -1,15 +1,30 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Role } from '@prisma/client';
 
 @Controller('reports')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
   constructor(private reportsService: ReportsService) {}
 
   @Get('dashboard')
   async getDashboardStats() {
     return this.reportsService.getDashboardStats();
+  }
+
+  @Get('employee-summary')
+  async getEmployeeSummary(@CurrentUser() user: any) {
+    return this.reportsService.getEmployeeSummary(user.id);
+  }
+
+  @Get('executive-summary')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  async getExecutiveSummary() {
+    return this.reportsService.getExecutiveSummary();
   }
 
   @Get('sales')

@@ -156,6 +156,73 @@ async function main() {
   });
 
   console.log('Games and Pricings seeded.');
+
+  // 5. Create Restaurant Tables
+  await prisma.table.createMany({
+    data: [
+      { number: 'T-01', capacity: 2 },
+      { number: 'T-02', capacity: 4 },
+      { number: 'T-03', capacity: 4 },
+      { number: 'T-04', capacity: 6 },
+      { number: 'T-05', capacity: 6 },
+      { number: 'T-06', capacity: 8 },
+      { number: 'T-07', capacity: 4 },
+      { number: 'T-08', capacity: 2 },
+    ],
+  });
+  console.log('Restaurant Tables seeded.');
+
+  // 6. Create Menu Categories & Dishes
+  const starters = await prisma.category.create({
+    data: { name: 'Starters', description: 'Appetizers and quick bites' },
+  });
+
+  const mainCourse = await prisma.category.create({
+    data: { name: 'Main Course', description: 'Curries, Biryanis and Rice' },
+  });
+
+  const breads = await prisma.category.create({
+    data: { name: 'Indian Breads', description: 'Freshly baked tandoori breads' },
+  });
+
+  const beverages = await prisma.category.create({
+    data: { name: 'Beverages', description: 'Cold drinks, juices and sodas' },
+  });
+
+  const desserts = await prisma.category.create({
+    data: { name: 'Desserts', description: 'Sweets and ice creams' },
+  });
+
+  await prisma.dish.createMany({
+    data: [
+      // Starters
+      { name: 'Paneer Tikka', price: 280, taxRate: 5.0, categoryId: starters.id, preparationTime: 15 },
+      { name: 'Chicken 65', price: 310, taxRate: 5.0, categoryId: starters.id, preparationTime: 15 },
+      { name: 'Crispy Corn', price: 220, taxRate: 5.0, categoryId: starters.id, preparationTime: 10 },
+
+      // Main Course
+      { name: 'Special Chicken Biryani', price: 340, taxRate: 5.0, categoryId: mainCourse.id, preparationTime: 20 },
+      { name: 'Paneer Butter Masala', price: 290, taxRate: 5.0, categoryId: mainCourse.id, preparationTime: 15 },
+      { name: 'Dal Makhani', price: 240, taxRate: 5.0, categoryId: mainCourse.id, preparationTime: 15 },
+      { name: 'Mutton Rogan Josh', price: 420, taxRate: 5.0, categoryId: mainCourse.id, preparationTime: 25 },
+
+      // Breads
+      { name: 'Butter Naan', price: 60, taxRate: 5.0, categoryId: breads.id, preparationTime: 5 },
+      { name: 'Garlic Naan', price: 75, taxRate: 5.0, categoryId: breads.id, preparationTime: 5 },
+      { name: 'Tandoori Roti', price: 35, taxRate: 5.0, categoryId: breads.id, preparationTime: 5 },
+
+      // Beverages
+      { name: 'Fresh Lime Soda', price: 80, taxRate: 5.0, categoryId: beverages.id, preparationTime: 5 },
+      { name: 'Mango Lassi', price: 110, taxRate: 5.0, categoryId: beverages.id, preparationTime: 5 },
+      { name: 'Cold Coffee', price: 130, taxRate: 5.0, categoryId: beverages.id, preparationTime: 5 },
+
+      // Desserts
+      { name: 'Gulab Jamun (2 pcs)', price: 90, taxRate: 5.0, categoryId: desserts.id, preparationTime: 5 },
+      { name: 'Sizzling Brownie with Ice Cream', price: 180, taxRate: 5.0, categoryId: desserts.id, preparationTime: 10 },
+    ],
+  });
+  console.log('Categories and Dishes seeded.');
+
   console.log('Seeding completed successfully!');
 }
 

@@ -57,7 +57,10 @@ export class ShiftsService {
     const expenses = await this.prisma.expense.aggregate({
       where: {
         userId: cashierId,
-        date: { gte: active.openingTime },
+        OR: [
+          { createdAt: { gte: active.openingTime } },
+          { date: { gte: active.openingTime } },
+        ],
       },
       _sum: { amount: true },
     });
@@ -167,7 +170,10 @@ export class ShiftsService {
     const expenses = await this.prisma.expense.aggregate({
       where: {
         userId: cashierId,
-        date: { gte: active.openingTime },
+        OR: [
+          { createdAt: { gte: active.openingTime } },
+          { date: { gte: active.openingTime } },
+        ],
       },
       _sum: { amount: true },
     });
