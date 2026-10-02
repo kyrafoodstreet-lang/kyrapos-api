@@ -281,22 +281,22 @@ model GameCustomer {
 }
 
 model GameBooking {
-  id          String       @id @default(uuid())
-  bookingCode String       @unique // e.g. "BK-9842"
+  id          String   @id @default(uuid())
+  bookingCode String   @unique // e.g. "BK-9842"
   customerId  String
   gameId      String
   pricingId   String?
-  guestCount  Int          @default(1)
-  adultCount  Int          @default(0)
-  childCount  Int          @default(0)
-  duration    Int          @default(30)
-  unitPrice   Decimal      @db.Decimal(10, 2)
-  totalAmount Decimal      @db.Decimal(10, 2)
-  status      String       @default("CONFIRMED") // CONFIRMED, CHECKED_IN, CANCELLED
-  bookingDate DateTime     @default(now())
+  guestCount  Int      @default(1)
+  adultCount  Int      @default(0)
+  childCount  Int      @default(0)
+  duration    Int      @default(30)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  totalAmount Decimal  @db.Decimal(10, 2)
+  status      String   @default("CONFIRMED") // CONFIRMED, CHECKED_IN, CANCELLED
+  bookingDate DateTime @default(now())
   notes       String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   customer GameCustomer @relation(fields: [customerId], references: [id])
   game     Game         @relation(fields: [gameId], references: [id])
@@ -382,31 +382,31 @@ model GameActivityLog {
 }
 
 model GameDayClose {
-  id                String   @id @default(uuid())
-  date              DateTime // Start of day (00:00:00)
-  dateStr           String   @unique // e.g. "2026-10-02"
-  closedAt          DateTime @default(now())
-  closedById        String
-  closedByName      String
-  totalRevenue      Decimal  @db.Decimal(10, 2)
-  cashSales         Decimal  @db.Decimal(10, 2)
-  upiSales          Decimal  @db.Decimal(10, 2)
-  cardSales         Decimal  @default(0.00) @db.Decimal(10, 2)
+  id           String   @id @default(uuid())
+  date         DateTime // Start of day (00:00:00)
+  dateStr      String   @unique // e.g. "2026-10-02"
+  closedAt     DateTime @default(now())
+  closedById   String
+  closedByName String
+  totalRevenue Decimal  @db.Decimal(10, 2)
+  cashSales    Decimal  @db.Decimal(10, 2)
+  upiSales     Decimal  @db.Decimal(10, 2)
+  cardSales    Decimal  @default(0.00) @db.Decimal(10, 2)
 
   // Trampoline & Coin Breakdown
-  trampCash         Decimal  @default(0.00) @db.Decimal(10, 2)
-  trampUpi          Decimal  @default(0.00) @db.Decimal(10, 2)
-  coinCash          Decimal  @default(0.00) @db.Decimal(10, 2)
-  coinUpi           Decimal  @default(0.00) @db.Decimal(10, 2)
-  otherCash         Decimal  @default(0.00) @db.Decimal(10, 2)
-  otherUpi          Decimal  @default(0.00) @db.Decimal(10, 2)
+  trampCash Decimal @default(0.00) @db.Decimal(10, 2)
+  trampUpi  Decimal @default(0.00) @db.Decimal(10, 2)
+  coinCash  Decimal @default(0.00) @db.Decimal(10, 2)
+  coinUpi   Decimal @default(0.00) @db.Decimal(10, 2)
+  otherCash Decimal @default(0.00) @db.Decimal(10, 2)
+  otherUpi  Decimal @default(0.00) @db.Decimal(10, 2)
 
-  actualCash        Decimal  @db.Decimal(10, 2)
-  actualUpi         Decimal  @db.Decimal(10, 2)
-  actualTrampCash   Decimal? @default(0.00) @db.Decimal(10, 2)
-  actualTrampUpi    Decimal? @default(0.00) @db.Decimal(10, 2)
-  actualCoinCash    Decimal? @default(0.00) @db.Decimal(10, 2)
-  actualCoinUpi     Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualCash      Decimal  @db.Decimal(10, 2)
+  actualUpi       Decimal  @db.Decimal(10, 2)
+  actualTrampCash Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualTrampUpi  Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualCoinCash  Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualCoinUpi   Decimal? @default(0.00) @db.Decimal(10, 2)
 
   cashDifference    Decimal  @db.Decimal(10, 2)
   upiDifference     Decimal  @db.Decimal(10, 2)
