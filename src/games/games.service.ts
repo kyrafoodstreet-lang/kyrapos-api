@@ -23,6 +23,12 @@ export class GamesService {
   async getGames() {
     return this.prisma.game.findMany({
       where: { deletedAt: null },
+      include: {
+        pricings: {
+          where: { isActive: true },
+          orderBy: { price: 'asc' },
+        },
+      },
       orderBy: { name: 'asc' },
     });
   }
@@ -127,6 +133,21 @@ export class GamesService {
   // 3. CUSTOMER MANAGEMENT
   // ==========================================
 
+  private async generateCustomerCode(tx?: any): Promise<string> {
+    const client = tx || this.prisma;
+    const count = await client.gameCustomer.count();
+    const nextNum = count + 1;
+    let code = `CUST-${String(nextNum).padStart(6, '0')}`;
+    let exists = await client.gameCustomer.findUnique({ where: { customerCode: code } });
+    let offset = 1;
+    while (exists) {
+      code = `CUST-${String(nextNum + offset).padStart(6, '0')}`;
+      exists = await client.gameCustomer.findUnique({ where: { customerCode: code } });
+      offset++;
+    }
+    return code;
+  }
+
   async getCustomers() {
     const list = await this.prisma.gameCustomer.findMany({
       include: {
@@ -134,6 +155,7 @@ export class GamesService {
           include: { payments: true, game: true },
         },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
     return list.map((c) => {
@@ -154,19 +176,25 @@ export class GamesService {
           lastVisit = s.entryTime;
         }
 
-        if (!gameCounts[s.gameId]) {
+        if (s.game && !gameCounts[s.gameId]) {
           gameCounts[s.gameId] = { name: s.game.name, count: 0 };
         }
-        gameCounts[s.gameId].count += 1;
+        if (s.game) {
+          gameCounts[s.gameId].count += 1;
+        }
       });
 
       const sortedGames = Object.values(gameCounts).sort((a, b) => b.count - a.count);
-      const favoriteGame = sortedGames.length > 0 ? sortedGames[0].name : 'None';
+      const favoriteGame = sortedGames.length > 0 ? sortedGames[0].name : 'General Play';
 
       return {
         id: c.id,
+        customerCode: (c as any).customerCode || `CUST-${c.id.slice(0, 6).toUpperCase()}`,
         name: c.name,
         mobile: c.mobile,
+        email: (c as any).email || null,
+        parentName: (c as any).parentName || null,
+        childName: (c as any).childName || null,
         age: c.age,
         gender: c.gender,
         totalVisits,
@@ -179,11 +207,13 @@ export class GamesService {
   }
 
   async searchCustomer(mobile: string) {
+    const cleanMobile = mobile.trim();
     const c = await this.prisma.gameCustomer.findUnique({
-      where: { mobile },
+      where: { mobile: cleanMobile },
       include: {
         sessions: {
           include: { payments: true },
+          orderBy: { entryTime: 'desc' },
         },
       },
     });
@@ -200,27 +230,93 @@ export class GamesService {
 
     return {
       id: c.id,
+      customerCode: (c as any).customerCode || `CUST-${c.id.slice(0, 6).toUpperCase()}`,
       name: c.name,
       mobile: c.mobile,
-      age: c.age,
-      gender: c.gender,
+      email: (c as any).email || null,
+      parentName: (c as any).parentName || null,
+      childName: (c as any).childName || null,
+      age: c.age || 0,
+      gender: c.gender || 'OTHER',
       previousVisits: c.sessions.length,
-      lastVisit: c.sessions.length > 0 ? c.sessions[c.sessions.length - 1].entryTime : null,
+      lastVisit: c.sessions.length > 0 ? c.sessions[0].entryTime : null,
       totalSpent,
       currentActiveSession: active ? active.id : null,
     };
   }
 
   async createCustomer(dto: CreateCustomerDto) {
+    const cleanMobile = dto.mobile.trim();
     const existing = await this.prisma.gameCustomer.findUnique({
-      where: { mobile: dto.mobile },
+      where: { mobile: cleanMobile },
     });
     if (existing) {
-      throw new BadRequestException('Customer with this mobile already exists');
+      throw new BadRequestException('Customer with this mobile number already exists');
     }
+    const customerCode = await this.generateCustomerCode();
     return this.prisma.gameCustomer.create({
-      data: dto,
+      data: {
+        customerCode,
+        name: dto.name.trim(),
+        mobile: cleanMobile,
+        email: dto.email?.trim() || null,
+        parentName: dto.parentName?.trim() || null,
+        childName: dto.childName?.trim() || null,
+        age: dto.age ?? 0,
+        gender: dto.gender ?? 'OTHER',
+      } as any,
     });
+  }
+
+
+
+  async validateOffer(code: string, subtotal: number) {
+    if (!code || typeof code !== 'string') {
+      throw new BadRequestException('Offer code is required');
+    }
+    const cleanCode = code.trim().toUpperCase();
+
+    // Configured promotional offers
+    const offerRules: Record<string, { type: 'PERCENT' | 'FLAT'; value: number; minSubtotal: number; maxDiscount?: number; description: string }> = {
+      'KYRA10': { type: 'PERCENT', value: 10, minSubtotal: 100, maxDiscount: 200, description: '10% Discount on booking' },
+      'WELCOME10': { type: 'PERCENT', value: 10, minSubtotal: 100, maxDiscount: 200, description: '10% Welcome Discount' },
+      'KYRA20': { type: 'PERCENT', value: 20, minSubtotal: 300, maxDiscount: 500, description: '20% Special Discount' },
+      'VIP20': { type: 'PERCENT', value: 20, minSubtotal: 300, maxDiscount: 500, description: '20% VIP Club Discount' },
+      'FLAT50': { type: 'FLAT', value: 50, minSubtotal: 200, description: 'Flat ₹50 Off' },
+      'FLAT100': { type: 'FLAT', value: 100, minSubtotal: 400, description: 'Flat ₹100 Off' },
+      'WEEKEND': { type: 'PERCENT', value: 15, minSubtotal: 200, maxDiscount: 300, description: '15% Weekend Special' },
+      'SPECIAL50': { type: 'FLAT', value: 50, minSubtotal: 150, description: '₹50 Promotional Offer' },
+    };
+
+    const offer = offerRules[cleanCode];
+    if (!offer) {
+      throw new BadRequestException(`Offer code '${cleanCode}' is invalid or expired`);
+    }
+
+    if (subtotal < offer.minSubtotal) {
+      throw new BadRequestException(`Offer code '${cleanCode}' requires a minimum booking amount of ₹${offer.minSubtotal}`);
+    }
+
+    let discount = 0;
+    if (offer.type === 'PERCENT') {
+      discount = Math.round((subtotal * offer.value) / 100);
+      if (offer.maxDiscount && discount > offer.maxDiscount) {
+        discount = offer.maxDiscount;
+      }
+    } else {
+      discount = offer.value;
+    }
+    discount = Math.min(discount, subtotal);
+    const finalAmount = Math.max(0, subtotal - discount);
+
+    return {
+      valid: true,
+      code: cleanCode,
+      discount,
+      subtotal,
+      finalAmount,
+      description: offer.description,
+    };
   }
 
   // ==========================================
@@ -286,42 +382,148 @@ export class GamesService {
   }
 
   async startSession(cashierId: string, cashierRole: string, dto: CreateSessionDto) {
-    const customer = await this.prisma.gameCustomer.findUnique({
-      where: { id: dto.customerId },
-    });
-    if (!customer) {
-      throw new NotFoundException('Customer profile not found');
+    // Resolve Game Zone based on explicit gameId or zone type
+    let game = null;
+    if (dto.gameId) {
+      game = await this.prisma.game.findFirst({
+        where: { id: dto.gameId, deletedAt: null },
+      });
     }
-
-    const game = await this.prisma.game.findFirst({
-      where: { id: dto.gameId, deletedAt: null },
-    });
+    if (!game && (dto.zone === 'COIN_GAME' || dto.zone === 'COIN_GAMES')) {
+      game = await this.prisma.game.findFirst({
+        where: { name: { contains: 'Coin', mode: 'insensitive' }, deletedAt: null },
+      });
+    }
+    if (!game && dto.zone === 'TRAMPOLINE') {
+      game = await this.prisma.game.findFirst({
+        where: { name: { contains: 'Trampoline', mode: 'insensitive' }, deletedAt: null },
+      });
+    }
+    if (!game) {
+      game = await this.prisma.game.findFirst({
+        where: { deletedAt: null },
+        orderBy: { name: 'asc' },
+      });
+    }
     if (!game) {
       throw new NotFoundException('Game catalog entry not found');
     }
 
-    const pricing = await this.prisma.gamePricing.findUnique({
-      where: { id: dto.pricingId },
-    });
-    if (!pricing) {
-      throw new NotFoundException('Pricing package not found');
+    const isCoinGame = (dto.zone === 'COIN_GAME' || dto.zone === 'COIN_GAMES' || game.name.toLowerCase().includes('coin'));
+    const isTrampoline = (dto.zone === 'TRAMPOLINE' || game.name.toLowerCase().includes('trampoline'));
+
+    // Resolve Pricing
+    let pricing = null;
+    const targetPricingId = dto.pricingId || dto.coinPackageId;
+    if (targetPricingId && !targetPricingId.startsWith('coin-')) {
+      pricing = await this.prisma.gamePricing.findUnique({
+        where: { id: targetPricingId },
+      });
     }
 
-    // 1. Manager Override validation
-    const discount = Number(dto.discount || 0);
+    let adultCount = 0;
+    let childCount = 0;
+    let totalGuests = 1;
+    let duration = 30;
+    let subtotal = 0;
+
+    if (isCoinGame) {
+      // Coin Game Business Rules:
+      // Packages determine amount directly (1 Coin: ₹40, 4 Coins: ₹150, 10 Coins: ₹350)
+      // Supports multi-quantity package selection
+      adultCount = 0;
+      childCount = 0;
+      totalGuests = 1;
+      duration = 0;
+
+      const coinMap: Record<string, number> = {
+        'coin-1': 40,
+        'coin-4': 150,
+        'coin-10': 350,
+      };
+
+      if (dto.coinQuantities && typeof dto.coinQuantities === 'object') {
+        let total = 0;
+        for (const [pkgId, qty] of Object.entries(dto.coinQuantities)) {
+          const count = Number(qty) || 0;
+          if (count > 0) {
+            const price = coinMap[pkgId] || 40;
+            total += price * count;
+          }
+        }
+        subtotal = total > 0 ? total : 40;
+      } else if (pricing) {
+        subtotal = Math.round(Number(pricing.price));
+      } else {
+        const targetKey = dto.coinPackageId || dto.pricingId || 'coin-4';
+        subtotal = coinMap[targetKey] || 150;
+      }
+    } else if (isTrampoline) {
+      // Trampoline Business Rules:
+      adultCount = Number(dto.adultCount ?? 0);
+      childCount = Number(dto.childCount ?? 0);
+      if (adultCount === 0 && childCount === 0) {
+        adultCount = 1;
+      }
+      totalGuests = Math.max(1, adultCount + childCount);
+      duration = [30, 60, 90, 120].includes(Number(dto.duration)) ? Number(dto.duration) : 30;
+      const durationMultiplier = duration / 30;
+
+      let adultRatePer30 = 200;
+      let childRatePer30 = 100;
+      if (pricing && pricing.price) {
+        const pDur = pricing.duration > 0 ? pricing.duration : 30;
+        adultRatePer30 = Number(pricing.price) / (pDur / 30);
+      }
+
+      const adultTotal = adultCount * adultRatePer30 * durationMultiplier;
+      const childTotal = childCount * childRatePer30 * durationMultiplier;
+      subtotal = Math.round(adultTotal + childTotal);
+    } else {
+      // Arcade / Other Zones
+      adultCount = Number(dto.adultCount ?? 0);
+      childCount = Number(dto.childCount ?? 0);
+      totalGuests = Math.max(1, adultCount + childCount || dto.guestCount || 1);
+      duration = dto.duration || (pricing && pricing.duration > 0 ? pricing.duration : 30) || 30;
+
+      if (pricing) {
+        subtotal = Math.round(Number(pricing.price) * totalGuests);
+      } else {
+        const durationMultiplier = duration > 0 ? duration / 30 : 1;
+        subtotal = Math.round(200 * durationMultiplier * totalGuests);
+      }
+    }
+
+    // Optional Grip Socks (₹70 per pair)
+    const socksCount = Math.max(0, Number(dto.socksCount || 0));
+    const socksPrice = Number(dto.socksPrice || 70);
+    const socksAmount = socksCount * socksPrice;
+    if (socksAmount > 0) {
+      subtotal += socksAmount;
+    }
+
+    // Validate Offer Code if supplied
+    let offerDiscount = 0;
+    if (dto.offerCode && dto.offerCode.trim()) {
+      const offerResult = await this.validateOffer(dto.offerCode, subtotal);
+      offerDiscount = offerResult.discount;
+    }
+
+    // Validate Manual / Discretionary Discount & Manager Override
+    const manualDiscount = Number(dto.manualDiscount || dto.discount || 0);
     let isOverridden = false;
     let overrideUserName: string | null = null;
+    let overrideReason: string | null = null;
 
-    if (discount > 0) {
+    if (manualDiscount > 0) {
       if (cashierRole === 'ADMIN' || cashierRole === 'MANAGER') {
-        // managers can self-approve discount overrides
         isOverridden = true;
         const selfUser = await this.prisma.user.findUnique({ where: { id: cashierId } });
         overrideUserName = selfUser?.name || 'Manager';
+        overrideReason = dto.overrideAuth?.reason || 'Manager Discretionary Discount self-approved';
       } else {
-        // cashiers must present manager authentication payload
         if (!dto.overrideAuth) {
-          throw new BadRequestException('Manager override credentials are required for discounts');
+          throw new BadRequestException('Manager override credentials are required for discretionary discounts');
         }
         const manager = await this.prisma.user.findUnique({
           where: { email: dto.overrideAuth.username },
@@ -338,56 +540,154 @@ export class GamesService {
         }
         isOverridden = true;
         overrideUserName = manager.name;
+        overrideReason = dto.overrideAuth.reason;
       }
     }
 
-    // 2. Pricing Calculations
-    const originalPrice = Number(pricing.price) * Number(dto.guestCount || 1);
-    const subtotal = Math.max(0, originalPrice - discount);
-    const gstRate = Number(dto.gst || 0);
-    const grandTotal = Math.max(0, subtotal + gstRate);
+    // Server-Authoritative Totals (NO GST)
+    const totalDiscount = Math.min(subtotal, offerDiscount + manualDiscount);
+    const finalGrandTotal = Math.max(0, subtotal - totalDiscount);
 
-    // 3. Create Session inside Prisma Transaction
+    // Validate Payment Method and Split Amounts
+    const method = dto.paymentMethod?.toUpperCase() || 'CASH';
+    let cashPortion = 0;
+    let upiPortion = 0;
+
+    if (method === 'CASH') {
+      cashPortion = finalGrandTotal;
+      upiPortion = 0;
+    } else if (method === 'UPI') {
+      cashPortion = 0;
+      upiPortion = finalGrandTotal;
+    } else if (method === 'CASH_AND_UPI' || method === 'CASH_UPI' || method === 'MIXED') {
+      cashPortion = Number(dto.cashAmount || 0);
+      upiPortion = Number(dto.upiAmount || 0);
+      const splitSum = Math.round((cashPortion + upiPortion) * 100) / 100;
+      if (Math.abs(splitSum - finalGrandTotal) > 0.01) {
+        throw new BadRequestException(
+          `Payment mismatch: Cash (₹${cashPortion}) + UPI (₹${upiPortion}) = ₹${splitSum}, which does not match Final Total ₹${finalGrandTotal}`,
+        );
+      }
+    } else {
+      cashPortion = finalGrandTotal;
+    }
+
+    // Atomic Database Transaction
     return this.prisma.$transaction(async (tx) => {
+      // 1. Resolve or Create Customer inside Transaction
+      let customer = null;
+      if (dto.customerId) {
+        customer = await tx.gameCustomer.findUnique({
+          where: { id: dto.customerId },
+        });
+      } else if (dto.customerMobile) {
+        const cleanMobile = dto.customerMobile.trim();
+        customer = await tx.gameCustomer.findUnique({
+          where: { mobile: cleanMobile },
+        });
+
+        if (!customer) {
+          if (!dto.customerName || !dto.customerName.trim()) {
+            throw new BadRequestException('Customer name is required to register a new customer');
+          }
+          const customerCode = await this.generateCustomerCode(tx);
+          customer = await tx.gameCustomer.create({
+            data: {
+              customerCode,
+              name: dto.customerName.trim(),
+              mobile: cleanMobile,
+              email: dto.customerEmail?.trim() || null,
+              parentName: dto.customerParentName?.trim() || null,
+              childName: dto.customerChildName?.trim() || null,
+              age: 0,
+              gender: 'OTHER',
+            } as any,
+          });
+        }
+      }
+
+      if (!customer) {
+        throw new BadRequestException('Customer profile could not be resolved or created');
+      }
+
       const session = await tx.gameSession.create({
         data: {
           customerId: customer.id,
           gameId: game.id,
-          pricingId: pricing.id,
-          guestCount: dto.guestCount,
+          pricingId: pricing?.id || undefined,
+          guestCount: totalGuests,
+          adultCount,
+          childCount,
+          duration,
+          offerCode: dto.offerCode || undefined,
           status: 'ACTIVE',
-          originalPrice,
-          discount,
-          gst: gstRate,
-          grandTotal,
-          overrideUser: overrideUserName,
-          overrideReason: dto.overrideAuth?.reason || (discount > 0 ? 'Manager Discount self-approved' : null),
-          notes: dto.notes || null,
+          entryTime: new Date(),
+          originalPrice: subtotal,
+          discount: totalDiscount,
+          extraCharges: 0,
+          gst: 0, // NO GST
+          grandTotal: finalGrandTotal,
+          overrideUser: overrideUserName || undefined,
+          overrideReason: overrideReason || undefined,
+          notes: socksCount > 0
+            ? (dto.notes ? `${dto.notes} | Grip Socks: ${socksCount} pair${socksCount > 1 ? 's' : ''} (₹${socksAmount})` : `Grip Socks: ${socksCount} pair${socksCount > 1 ? 's' : ''} (₹${socksAmount})`)
+            : (dto.notes || undefined),
+        } as any,
+        include: {
+          customer: true,
+          game: true,
         },
       });
 
-      // Log Payment if any is collected immediately
-      if (dto.amountPaid && dto.amountPaid > 0) {
-        await tx.gamePayment.create({
-          data: {
-            sessionId: session.id,
-            amount: dto.amountPaid,
-            method: dto.paymentMethod || 'CASH',
-            notes: 'Advance checkout payment received',
-            date: new Date(),
-          },
-        });
+      // Create Payment Ledger Records
+      if (finalGrandTotal > 0) {
+        if (method === 'CASH_AND_UPI' || method === 'CASH_UPI' || method === 'MIXED') {
+          if (cashPortion > 0) {
+            await tx.gamePayment.create({
+              data: {
+                sessionId: session.id,
+                amount: cashPortion,
+                method: 'CASH',
+                notes: `Split payment: Cash portion of booking #${session.sessionId}`,
+                date: new Date(),
+              },
+            });
+          }
+          if (upiPortion > 0) {
+            await tx.gamePayment.create({
+              data: {
+                sessionId: session.id,
+                amount: upiPortion,
+                method: 'UPI',
+                notes: `Split payment: UPI portion of booking #${session.sessionId}`,
+                date: new Date(),
+              },
+            });
+          }
+        } else {
+          await tx.gamePayment.create({
+            data: {
+              sessionId: session.id,
+              amount: finalGrandTotal,
+              method: method,
+              notes: `Booking #${session.sessionId} payment received via ${method}`,
+              date: new Date(),
+            },
+          });
+        }
       }
 
       // Log Activity
+      const custCodeDisplay = (customer as any).customerCode || customer.id;
       await tx.gameActivityLog.create({
         data: {
           userId: cashierId,
           sessionId: session.id,
           action: 'CREATE_SESSION',
-          details: `Session started for customer ${customer.name} for game ${game.name}. Package: ${pricing.name}. Paid: ₹${dto.amountPaid || 0}`,
+          details: `Session #${session.sessionId} created for ${customer.name} (${custCodeDisplay}). Adults: ${adultCount}, Children: ${childCount}, Duration: ${duration}m. Paid: ₹${finalGrandTotal} via ${method}.`,
         },
       });
+
 
       if (isOverridden) {
         await tx.gameActivityLog.create({
@@ -395,7 +695,7 @@ export class GamesService {
             userId: cashierId,
             sessionId: session.id,
             action: 'PRICE_OVERRIDE',
-            details: `Price override approved by ${overrideUserName}. Discount: ₹${discount}. Reason: ${dto.overrideAuth?.reason || 'Self-approved discount'}`,
+            details: `Manual discount of ₹${manualDiscount} approved by ${overrideUserName}. Reason: ${overrideReason}`,
           },
         });
       }
@@ -403,6 +703,7 @@ export class GamesService {
       return session;
     });
   }
+
 
   async closeSession(id: string, dto: CloseSessionDto, userId: string) {
     const session = await this.prisma.gameSession.findUnique({
@@ -423,7 +724,7 @@ export class GamesService {
     const actualDuration = Math.max(1, Math.round((exitTime.getTime() - entryTime.getTime()) / 1000 / 60));
 
     // Overtime Calculations if package has duration
-    const packageDuration = session.pricing.duration;
+    const packageDuration = (session as any).pricing?.duration || (session as any).duration || 30;
     const packagePrice = Number(session.originalPrice);
     
     let calculatedExtraCharges = 0;
@@ -718,11 +1019,657 @@ export class GamesService {
         sessionId: s.sessionId,
         customerName: s.customer.name,
         gameName: s.game.name,
-        packageName: s.pricing.name,
+        packageName: (s as any).pricing?.name || `${(s as any).duration || 30}m Play`,
         entryTime: s.entryTime,
         status: s.status,
         grandTotal: Number(s.grandTotal),
       })),
     };
   }
+
+  // ==========================================
+  // 8. DAY CLOSING & RECONCILIATION
+  // ==========================================
+
+  private parseDateRange(dateStr?: string) {
+    let targetDate: Date;
+    let formattedDateStr: string;
+
+    if (dateStr && dateStr.trim()) {
+      formattedDateStr = dateStr.trim();
+      const parts = formattedDateStr.split('-');
+      if (parts.length === 3) {
+        targetDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      } else {
+        targetDate = new Date(dateStr);
+      }
+    } else {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      formattedDateStr = `${yyyy}-${mm}-${dd}`;
+      targetDate = new Date(yyyy, now.getMonth(), now.getDate());
+    }
+
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    return { startOfDay, endOfDay, dateStr: formattedDateStr };
+  }
+
+  async getDayCloseStatus(dateStr?: string) {
+    const { startOfDay, endOfDay, dateStr: formattedDateStr } = this.parseDateRange(dateStr);
+
+    // 1. Fetch payments on this day
+    const payments = await this.prisma.gamePayment.findMany({
+      where: {
+        date: { gte: startOfDay, lte: endOfDay },
+      },
+      include: {
+        session: {
+          include: {
+            customer: true,
+            game: true,
+            pricing: true,
+          },
+        },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    let totalRevenue = 0;
+    let cashSales = 0;
+    let upiSales = 0;
+    let cardSales = 0;
+    let mixedSales = 0;
+
+    let trampCash = 0;
+    let trampUpi = 0;
+    let trampCard = 0;
+
+    let coinCash = 0;
+    let coinUpi = 0;
+    let coinCard = 0;
+
+    let otherCash = 0;
+    let otherUpi = 0;
+    let otherCard = 0;
+
+    // Map for game specific payment collections
+    const gamePaymentMap: Record<string, { cash: number; upi: number; card: number; total: number }> = {};
+
+    for (const p of payments) {
+      const amt = Number(p.amount);
+      totalRevenue += amt;
+      const m = (p.method || '').toUpperCase();
+      const gNameRaw = p.session?.game?.name || 'General Arcade';
+      const gNameLower = gNameRaw.toLowerCase();
+
+      if (!gamePaymentMap[gNameRaw]) {
+        gamePaymentMap[gNameRaw] = { cash: 0, upi: 0, card: 0, total: 0 };
+      }
+      gamePaymentMap[gNameRaw].total += amt;
+
+      let pCash = 0;
+      let pUpi = 0;
+      let pCard = 0;
+
+      if (m === 'CASH') {
+        pCash = amt;
+      } else if (m === 'UPI' || m === 'BANK_TRANSFER') {
+        pUpi = amt;
+      } else if (m === 'CARD') {
+        pCard = amt;
+      } else if (m === 'MIXED' || m.includes('CASH_AND_UPI')) {
+        mixedSales += amt;
+        if (p.notes && p.notes.includes('Cash:') && p.notes.includes('UPI:')) {
+          const matchCash = p.notes.match(/Cash:\s*₹?([0-9.]+)/i);
+          const matchUpi = p.notes.match(/UPI:\s*₹?([0-9.]+)/i);
+          if (matchCash && matchUpi) {
+            pCash = Number(matchCash[1]);
+            pUpi = Number(matchUpi[1]);
+          } else {
+            pCash = amt / 2;
+            pUpi = amt / 2;
+          }
+        } else {
+          pCash = amt / 2;
+          pUpi = amt / 2;
+        }
+      } else {
+        pCash = amt;
+      }
+
+      cashSales += pCash;
+      upiSales += pUpi;
+      cardSales += pCard;
+
+      gamePaymentMap[gNameRaw].cash += pCash;
+      gamePaymentMap[gNameRaw].upi += pUpi;
+      gamePaymentMap[gNameRaw].card += pCard;
+
+      if (gNameLower.includes('tramp')) {
+        trampCash += pCash;
+        trampUpi += pUpi;
+        trampCard += pCard;
+      } else if (gNameLower.includes('coin') || gNameLower.includes('arcade')) {
+        coinCash += pCash;
+        coinUpi += pUpi;
+        coinCard += pCard;
+      } else {
+        otherCash += pCash;
+        otherUpi += pUpi;
+        otherCard += pCard;
+      }
+    }
+
+    // 2. Fetch sessions entered on this day
+    const sessions = await this.prisma.gameSession.findMany({
+      where: {
+        entryTime: { gte: startOfDay, lte: endOfDay },
+      },
+      include: {
+        customer: true,
+        game: true,
+        pricing: true,
+        payments: true,
+      },
+      orderBy: { entryTime: 'asc' },
+    });
+
+    const totalSessions = sessions.length;
+    const completedSessions = sessions.filter((s) => s.status === 'COMPLETED').length;
+    const activeSessions = sessions.filter((s) => s.status === 'ACTIVE').length;
+    const totalVisitors = sessions.reduce((sum, s) => sum + (s.adultCount + s.childCount || s.guestCount || 1), 0);
+
+    // 3. Category/Game Breakdown
+    const gameBreakdownMap: Record<string, { name: string; sessions: number; visitors: number; revenue: number; cash: number; upi: number; card: number }> = {};
+    for (const s of sessions) {
+      const gName = s.game?.name || 'General Arcade';
+      if (!gameBreakdownMap[gName]) {
+        const pm = gamePaymentMap[gName] || { cash: 0, upi: 0, card: 0, total: 0 };
+        gameBreakdownMap[gName] = {
+          name: gName,
+          sessions: 0,
+          visitors: 0,
+          revenue: 0,
+          cash: Math.round(pm.cash * 100) / 100,
+          upi: Math.round(pm.upi * 100) / 100,
+          card: Math.round(pm.card * 100) / 100,
+        };
+      }
+      gameBreakdownMap[gName].sessions += 1;
+      gameBreakdownMap[gName].visitors += (s.adultCount + s.childCount || s.guestCount || 1);
+      gameBreakdownMap[gName].revenue += Number(s.grandTotal);
+    }
+
+    // Ensure games with payments but no created sessions on same date are also included
+    for (const [gName, pm] of Object.entries(gamePaymentMap)) {
+      if (!gameBreakdownMap[gName]) {
+        gameBreakdownMap[gName] = {
+          name: gName,
+          sessions: 0,
+          visitors: 0,
+          revenue: pm.total,
+          cash: Math.round(pm.cash * 100) / 100,
+          upi: Math.round(pm.upi * 100) / 100,
+          card: Math.round(pm.card * 100) / 100,
+        };
+      }
+    }
+
+    const byGame = Object.values(gameBreakdownMap);
+
+    // 4. Check if Day is already closed
+    const closingRecord = await (this.prisma as any).gameDayClose.findUnique({
+      where: { dateStr: formattedDateStr },
+    });
+
+    return {
+      date: formattedDateStr,
+      displayDate: startOfDay.toLocaleDateString('en-IN', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      }),
+      isClosed: !!closingRecord,
+      closingRecord: closingRecord
+        ? {
+            ...closingRecord,
+            totalRevenue: Number(closingRecord.totalRevenue),
+            cashSales: Number(closingRecord.cashSales),
+            upiSales: Number(closingRecord.upiSales),
+            cardSales: Number(closingRecord.cardSales),
+            trampCash: Number(closingRecord.trampCash || 0),
+            trampUpi: Number(closingRecord.trampUpi || 0),
+            coinCash: Number(closingRecord.coinCash || 0),
+            coinUpi: Number(closingRecord.coinUpi || 0),
+            otherCash: Number(closingRecord.otherCash || 0),
+            otherUpi: Number(closingRecord.otherUpi || 0),
+            actualCash: Number(closingRecord.actualCash),
+            actualUpi: Number(closingRecord.actualUpi),
+            actualTrampCash: Number(closingRecord.actualTrampCash || 0),
+            actualTrampUpi: Number(closingRecord.actualTrampUpi || 0),
+            actualCoinCash: Number(closingRecord.actualCoinCash || 0),
+            actualCoinUpi: Number(closingRecord.actualCoinUpi || 0),
+            cashDifference: Number(closingRecord.cashDifference),
+            upiDifference: Number(closingRecord.upiDifference),
+          }
+        : null,
+      summary: {
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        cashSales: Math.round(cashSales * 100) / 100,
+        upiSales: Math.round(upiSales * 100) / 100,
+        cardSales: Math.round(cardSales * 100) / 100,
+        mixedSales: Math.round(mixedSales * 100) / 100,
+
+        // Tramp & Coin Breakdown
+        trampCash: Math.round(trampCash * 100) / 100,
+        trampUpi: Math.round(trampUpi * 100) / 100,
+        trampTotal: Math.round((trampCash + trampUpi + trampCard) * 100) / 100,
+
+        coinCash: Math.round(coinCash * 100) / 100,
+        coinUpi: Math.round(coinUpi * 100) / 100,
+        coinTotal: Math.round((coinCash + coinUpi + coinCard) * 100) / 100,
+
+        otherCash: Math.round(otherCash * 100) / 100,
+        otherUpi: Math.round(otherUpi * 100) / 100,
+        otherTotal: Math.round((otherCash + otherUpi + otherCard) * 100) / 100,
+
+        totalSessions,
+        completedSessions,
+        activeSessions,
+        totalVisitors,
+        byGame,
+      },
+      transactions: payments.map((p) => ({
+        id: p.id,
+        sessionId: p.session?.sessionId || 0,
+        gameName: p.session?.game?.name || 'Game',
+        customerName: p.session?.customer?.name || 'Guest',
+        customerMobile: p.session?.customer?.mobile || '',
+        amount: Number(p.amount),
+        method: p.method,
+        notes: p.notes,
+        time: p.date,
+      })),
+    };
+  }
+
+  async closeGameDay(
+    user: { id: string; name?: string; email?: string },
+    dto: {
+      date?: string;
+      actualCash?: number;
+      actualUpi?: number;
+      actualTrampCash?: number;
+      actualTrampUpi?: number;
+      actualCoinCash?: number;
+      actualCoinUpi?: number;
+      notes?: string;
+    },
+  ) {
+    const statusData = await this.getDayCloseStatus(dto.date);
+    const { startOfDay, dateStr: formattedDateStr } = this.parseDateRange(dto.date);
+
+    const cashSales = statusData.summary.cashSales;
+    const upiSales = statusData.summary.upiSales;
+    const trampCash = statusData.summary.trampCash;
+    const trampUpi = statusData.summary.trampUpi;
+    const coinCash = statusData.summary.coinCash;
+    const coinUpi = statusData.summary.coinUpi;
+    const otherCash = statusData.summary.otherCash;
+    const otherUpi = statusData.summary.otherUpi;
+
+    const actualTrampCash = Number(dto.actualTrampCash ?? 0);
+    const actualTrampUpi = Number(dto.actualTrampUpi ?? 0);
+    const actualCoinCash = Number(dto.actualCoinCash ?? 0);
+    const actualCoinUpi = Number(dto.actualCoinUpi ?? 0);
+
+    // Calculate aggregated actual cash and UPI if not passed directly or calculate from sub-items
+    let actualCash = dto.actualCash !== undefined ? Number(dto.actualCash) : 0;
+    let actualUpi = dto.actualUpi !== undefined ? Number(dto.actualUpi) : 0;
+
+    if (dto.actualCash === undefined && (dto.actualTrampCash !== undefined || dto.actualCoinCash !== undefined)) {
+      actualCash = actualTrampCash + actualCoinCash;
+    }
+    if (dto.actualUpi === undefined && (dto.actualTrampUpi !== undefined || dto.actualCoinUpi !== undefined)) {
+      actualUpi = actualTrampUpi + actualCoinUpi;
+    }
+
+    const cashDifference = Math.round((actualCash - cashSales) * 100) / 100;
+    const upiDifference = Math.round((actualUpi - upiSales) * 100) / 100;
+
+    const closedByName = user.name || user.email || 'Staff';
+
+    // Upsert Day Close Record
+    const dayCloseRecord = await (this.prisma as any).gameDayClose.upsert({
+      where: { dateStr: formattedDateStr },
+      update: {
+        closedAt: new Date(),
+        closedById: user.id,
+        closedByName,
+        totalRevenue: statusData.summary.totalRevenue,
+        cashSales: cashSales,
+        upiSales: upiSales,
+        cardSales: statusData.summary.cardSales,
+        trampCash: trampCash,
+        trampUpi: trampUpi,
+        coinCash: coinCash,
+        coinUpi: coinUpi,
+        otherCash: otherCash,
+        otherUpi: otherUpi,
+        actualCash,
+        actualUpi,
+        actualTrampCash,
+        actualTrampUpi,
+        actualCoinCash,
+        actualCoinUpi,
+        cashDifference,
+        upiDifference,
+        totalSessions: statusData.summary.totalSessions,
+        completedSessions: statusData.summary.completedSessions,
+        activeSessions: statusData.summary.activeSessions,
+        totalVisitors: statusData.summary.totalVisitors,
+        notes: dto.notes?.trim() || null,
+      },
+      create: {
+        date: startOfDay,
+        dateStr: formattedDateStr,
+        closedAt: new Date(),
+        closedById: user.id,
+        closedByName,
+        totalRevenue: statusData.summary.totalRevenue,
+        cashSales: cashSales,
+        upiSales: upiSales,
+        cardSales: statusData.summary.cardSales,
+        trampCash: trampCash,
+        trampUpi: trampUpi,
+        coinCash: coinCash,
+        coinUpi: coinUpi,
+        otherCash: otherCash,
+        otherUpi: otherUpi,
+        actualCash,
+        actualUpi,
+        actualTrampCash,
+        actualTrampUpi,
+        actualCoinCash,
+        actualCoinUpi,
+        cashDifference,
+        upiDifference,
+        totalSessions: statusData.summary.totalSessions,
+        completedSessions: statusData.summary.completedSessions,
+        activeSessions: statusData.summary.activeSessions,
+        totalVisitors: statusData.summary.totalVisitors,
+        notes: dto.notes?.trim() || null,
+      },
+    });
+
+    // Log in GameActivityLog
+    await this.prisma.gameActivityLog.create({
+      data: {
+        userId: user.id,
+        action: 'GAME_DAY_CLOSE',
+        details: `Closed Games day ${formattedDateStr}. Tramp Cash: ₹${trampCash} (Actual: ₹${actualTrampCash}), Tramp UPI: ₹${trampUpi} (Actual: ₹${actualTrampUpi}), Coin Cash: ₹${coinCash} (Actual: ₹${actualCoinCash}), Coin UPI: ₹${coinUpi} (Actual: ₹${actualCoinUpi}). Total Cash Diff: ₹${cashDifference}, Total UPI Diff: ₹${upiDifference}.`,
+      },
+    });
+
+    return {
+      success: true,
+      message: `Games day for ${formattedDateStr} has been successfully closed!`,
+      dayClose: {
+        ...dayCloseRecord,
+        totalRevenue: Number(dayCloseRecord.totalRevenue),
+        cashSales: Number(dayCloseRecord.cashSales),
+        upiSales: Number(dayCloseRecord.upiSales),
+        cardSales: Number(dayCloseRecord.cardSales),
+        trampCash: Number(dayCloseRecord.trampCash || 0),
+        trampUpi: Number(dayCloseRecord.trampUpi || 0),
+        coinCash: Number(dayCloseRecord.coinCash || 0),
+        coinUpi: Number(dayCloseRecord.coinUpi || 0),
+        otherCash: Number(dayCloseRecord.otherCash || 0),
+        otherUpi: Number(dayCloseRecord.otherUpi || 0),
+        actualCash: Number(dayCloseRecord.actualCash),
+        actualUpi: Number(dayCloseRecord.actualUpi),
+        actualTrampCash: Number(dayCloseRecord.actualTrampCash || 0),
+        actualTrampUpi: Number(dayCloseRecord.actualTrampUpi || 0),
+        actualCoinCash: Number(dayCloseRecord.actualCoinCash || 0),
+        actualCoinUpi: Number(dayCloseRecord.actualCoinUpi || 0),
+        cashDifference: Number(dayCloseRecord.cashDifference),
+        upiDifference: Number(dayCloseRecord.upiDifference),
+      },
+      summary: statusData.summary,
+    };
+  }
+
+  async getDayCloseHistory() {
+    const list = await (this.prisma as any).gameDayClose.findMany({
+      orderBy: { date: 'desc' },
+      take: 60,
+    });
+
+    return list.map((item: any) => ({
+      ...item,
+      totalRevenue: Number(item.totalRevenue),
+      cashSales: Number(item.cashSales),
+      upiSales: Number(item.upiSales),
+      cardSales: Number(item.cardSales),
+      trampCash: Number(item.trampCash || 0),
+      trampUpi: Number(item.trampUpi || 0),
+      coinCash: Number(item.coinCash || 0),
+      coinUpi: Number(item.coinUpi || 0),
+      otherCash: Number(item.otherCash || 0),
+      otherUpi: Number(item.otherUpi || 0),
+      actualCash: Number(item.actualCash),
+      actualUpi: Number(item.actualUpi),
+      actualTrampCash: Number(item.actualTrampCash || 0),
+      actualTrampUpi: Number(item.actualTrampUpi || 0),
+      actualCoinCash: Number(item.actualCoinCash || 0),
+      actualCoinUpi: Number(item.actualCoinUpi || 0),
+      cashDifference: Number(item.cashDifference),
+      upiDifference: Number(item.upiDifference),
+    }));
+  }
+
+  // ==========================================
+  // PUBLIC SELF-BOOKING & CUSTOMER LOOKUP
+  // ==========================================
+
+  async getPublicCatalog() {
+    return this.prisma.game.findMany({
+      where: { isActive: true, deletedAt: null },
+      include: {
+        pricings: {
+          where: { isActive: true },
+          orderBy: { price: 'asc' },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createPublicBooking(dto: {
+    fullName: string;
+    mobile: string;
+    email?: string;
+    gameId?: string;
+    pricingId?: string;
+    adultCount?: number;
+    childCount?: number;
+    notes?: string;
+  }) {
+    const mobileClean = (dto.mobile || '').replace(/\D/g, '').slice(-10);
+    if (mobileClean.length < 10) {
+      throw new BadRequestException('Please enter a valid 10-digit mobile number.');
+    }
+
+    let game: any = null;
+    if (dto.gameId && dto.gameId.length > 10) {
+      game = await this.prisma.game.findUnique({
+        where: { id: dto.gameId },
+      });
+    }
+
+    if (!game) {
+      game = await this.prisma.game.findFirst({
+        where: { isActive: true, deletedAt: null },
+        orderBy: { name: 'asc' },
+      });
+    }
+
+    if (!game) {
+      game = await this.prisma.game.create({
+        data: {
+          name: 'Trampoline Park',
+          description: 'Trampoline adventure park',
+        },
+      });
+    }
+
+    let pricing: any = null;
+    let unitPrice = 0;
+    let duration = 30;
+
+    if (dto.pricingId) {
+      pricing = await this.prisma.gamePricing.findUnique({
+        where: { id: dto.pricingId },
+      });
+      if (pricing) {
+        unitPrice = Number(pricing.price);
+        duration = pricing.duration || 30;
+      }
+    }
+
+    const adultCount = Math.max(0, Number(dto.adultCount || 0));
+    const childCount = Math.max(0, Number(dto.childCount || 0));
+    const totalGuests = Math.max(1, adultCount + childCount);
+
+    // If unitPrice is 0, find first active pricing of the game
+    if (unitPrice === 0) {
+      const defaultPricing = await this.prisma.gamePricing.findFirst({
+        where: { gameId: game.id, isActive: true },
+        orderBy: { price: 'asc' },
+      });
+      if (defaultPricing) {
+        pricing = defaultPricing;
+        unitPrice = Number(defaultPricing.price);
+        duration = defaultPricing.duration || 30;
+      }
+    }
+
+    const totalAmount = pricing && pricing.duration === 0 ? unitPrice : unitPrice * totalGuests;
+
+    // Upsert Customer by mobile
+    let customer = await this.prisma.gameCustomer.findUnique({
+      where: { mobile: mobileClean },
+    });
+
+    if (!customer) {
+      customer = await this.prisma.gameCustomer.create({
+        data: {
+          name: dto.fullName.trim(),
+          mobile: mobileClean,
+          email: dto.email?.trim() || null,
+        },
+      });
+    } else if (dto.fullName.trim()) {
+      customer = await this.prisma.gameCustomer.update({
+        where: { id: customer.id },
+        data: {
+          name: dto.fullName.trim(),
+          email: dto.email?.trim() || customer.email,
+        },
+      });
+    }
+
+    // Generate unique booking code
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const bookingCode = `BK-${randomSuffix}`;
+
+    const booking = await (this.prisma as any).gameBooking.create({
+      data: {
+        bookingCode,
+        customerId: customer.id,
+        gameId: game.id,
+        pricingId: pricing?.id || null,
+        guestCount: totalGuests,
+        adultCount,
+        childCount,
+        duration,
+        unitPrice,
+        totalAmount,
+        status: 'CONFIRMED',
+        notes: dto.notes?.trim() || null,
+      },
+      include: {
+        customer: true,
+        game: true,
+        pricing: true,
+      },
+    });
+
+    return {
+      success: true,
+      message: `Booking ${bookingCode} confirmed successfully!`,
+      booking: {
+        ...booking,
+        unitPrice: Number(booking.unitPrice),
+        totalAmount: Number(booking.totalAmount),
+      },
+    };
+  }
+
+  async lookupCustomerByMobile(mobile: string) {
+    const mobileClean = (mobile || '').replace(/\D/g, '').slice(-10);
+    if (!mobileClean) {
+      return { customer: null, bookings: [], recentSessions: [] };
+    }
+
+    const customer = await this.prisma.gameCustomer.findFirst({
+      where: {
+        mobile: { contains: mobileClean },
+      },
+      include: {
+        bookings: {
+          where: { status: 'CONFIRMED' },
+          include: { game: true, pricing: true },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        },
+        sessions: {
+          include: { game: true, pricing: true, payments: true },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        },
+      },
+    });
+
+    if (!customer) {
+      return { customer: null, bookings: [], recentSessions: [] };
+    }
+
+    return {
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        mobile: customer.mobile,
+        email: customer.email,
+      },
+      bookings: customer.bookings.map((b: any) => ({
+        ...b,
+        unitPrice: Number(b.unitPrice),
+        totalAmount: Number(b.totalAmount),
+      })),
+      recentSessions: customer.sessions.map((s: any) => ({
+        ...s,
+        grandTotal: Number(s.grandTotal),
+      })),
+    };
+  }
 }
+

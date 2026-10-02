@@ -22,9 +22,13 @@ export class AuthService {
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = { sub: user.id, email: user.email, role: user.role, alwaysLogin: !!loginDto.alwaysLogin };
+    const signOptions: any = loginDto.alwaysLogin
+      ? { expiresIn: '365d' } // 1 Year / Always stay logged in
+      : { expiresIn: '1d' };   // 24 hours standard session
+
     return {
-      accessToken: this.jwtService.sign(payload),
+      accessToken: this.jwtService.sign(payload, signOptions),
       user: {
         id: user.id,
         email: user.email,

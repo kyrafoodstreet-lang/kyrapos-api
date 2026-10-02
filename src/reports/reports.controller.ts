@@ -16,6 +16,15 @@ export class ReportsController {
     return this.reportsService.getDashboardStats();
   }
 
+  @Get('admin-dashboard')
+  @Roles(Role.ADMIN, Role.MANAGER, Role.CASHIER)
+  async getAdminDashboard(
+    @Query('period') period?: 'today' | 'weekly' | 'monthly',
+    @Query('date') date?: string,
+  ) {
+    return this.reportsService.getAdminDashboardStats(period || 'today', date);
+  }
+
   @Get('employee-summary')
   async getEmployeeSummary(@CurrentUser() user: any) {
     return this.reportsService.getEmployeeSummary(user.id);
@@ -77,7 +86,19 @@ export class ReportsController {
     return this.reportsService.getExpenseReport(start, end);
   }
 
+  @Get('finance')
+  @Roles(Role.ADMIN)
+  async getFinanceReport(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const start = startDate ? new Date(startDate) : this.getDefaultStartDate();
+    const end = this.getEndOfDay(endDate);
+    return this.reportsService.getFinanceReport(start, end);
+  }
+
   private getDefaultStartDate(): Date {
+
     const date = new Date();
     date.setDate(1);
     date.setHours(0, 0, 0, 0);

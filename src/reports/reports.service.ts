@@ -495,29 +495,13 @@ export class ReportsService {
       },
     });
 
-    // 4. Fetch Party Hall payments today
-    const partyHallPayments = await this.prisma.partyHallPayment.findMany({
-      where: {
-        date: { gte: today, lt: tomorrow },
-      },
-    });
-
-    // 5. Fetch Party Hall bookings today
-    const partyHallBookingsToday = await this.prisma.partyHallBooking.findMany({
-      where: {
-        bookingDate: { gte: today, lt: tomorrow },
-        status: { in: ['BOOKED', 'RESERVED'] },
-      },
-    });
-
     // Calculations: Revenue
     const posRevenue = posOrders.reduce((sum, o) => sum + Number(o.grandTotal), 0);
     const gameRevenue = gamePayments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const partyHallRevenue = partyHallPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const totalRevenue = posRevenue + gameRevenue + partyHallRevenue;
+    const totalRevenue = posRevenue + gameRevenue;
 
     // Calculations: Orders
-    const totalOrders = posOrders.length + gameSessionsToday.length + partyHallBookingsToday.length;
+    const totalOrders = posOrders.length + gameSessionsToday.length;
 
     // Calculations: Customers
     const customerSet = new Set<string>();
@@ -533,14 +517,6 @@ export class ReportsService {
     });
     gameSessionsWithCust.forEach((s) => {
       customerSet.add(s.customer.mobile || s.customer.name);
-    });
-
-    const partyHallBookingsWithCust = await this.prisma.partyHallBooking.findMany({
-      where: { bookingDate: { gte: today, lt: tomorrow } },
-      include: { customer: true },
-    });
-    partyHallBookingsWithCust.forEach((b) => {
-      customerSet.add(b.customer.mobile || b.customer.name);
     });
 
     const totalCustomers = customerSet.size;
@@ -594,7 +570,6 @@ export class ReportsService {
       { name: 'Beverages', revenue: beverageSales },
       { name: 'Desserts', revenue: dessertSales },
       { name: 'Games', revenue: gameRevenue },
-      { name: 'Party Hall', revenue: partyHallRevenue },
       ...otherCategories.map((oc) => ({ name: oc.category, revenue: oc.revenue })),
     ];
 
@@ -653,15 +628,6 @@ export class ReportsService {
       else if (method.includes('CARD')) cardCollection += amt;
     });
 
-    // Party Hall
-    partyHallPayments.forEach((p) => {
-      const amt = Number(p.amount);
-      const method = p.method.toUpperCase();
-      if (method.includes('CASH')) cashCollection += amt;
-      else if (method.includes('UPI') || method.includes('BANK')) upiCollection += amt;
-      else if (method.includes('CARD')) cardCollection += amt;
-    });
-
     // Order Type Breakdown (POS completed orders)
     let dineIn = 0;
     let takeaway = 0;
@@ -673,7 +639,7 @@ export class ReportsService {
       else if (o.type === 'DELIVERY') delivery++;
     });
 
-    // Sales Trend (Today's Sales Trend: Hourly breakdown of POS + Games + Party Hall payments)
+    // Sales Trend (Today's Sales Trend: Hourly breakdown of POS + Games payments)
     const hourlySales: Record<number, number> = {};
     for (let i = 0; i < 24; i++) {
       hourlySales[i] = 0;
@@ -685,11 +651,6 @@ export class ReportsService {
     });
 
     gamePayments.forEach((p) => {
-      const hr = new Date(p.date).getHours();
-      hourlySales[hr] = (hourlySales[hr] || 0) + Number(p.amount);
-    });
-
-    partyHallPayments.forEach((p) => {
       const hr = new Date(p.date).getHours();
       hourlySales[hr] = (hourlySales[hr] || 0) + Number(p.amount);
     });
@@ -711,7 +672,6 @@ export class ReportsService {
         beverageSales,
         dessertSales,
         gamesRevenue: gameRevenue,
-        partyHallRevenue,
         otherCategories,
       },
       topSellingCategories,
@@ -727,6 +687,661 @@ export class ReportsService {
         delivery,
       },
       todaySalesTrend,
+    };
+  }
+
+  async getFinanceReport(start: Date, end: Date) {
+    // 1. POS Payments (from completed orders)
+    const posPayments = await this.prisma.payment.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+        status: PaymentStatus.COMPLETED,
+        order: {
+          deletedAt: null,
+          status: OrderStatus.COMPLETED,
+        },
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            customerName: true,
+            customerPhone: true,
+            grandTotal: true,
+            type: true,
+            cashier: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 2. Game Payments
+    const gamePayments = await this.prisma.gamePayment.findMany({
+      where: {
+        date: { gte: start, lte: end },
+      },
+      include: {
+        session: {
+          select: {
+            sessionId: true,
+            grandTotal: true,
+            customer: { select: { name: true, mobile: true } },
+            game: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    // Aggregate KPIs
+    let totalCash = 0;
+    let totalUpi = 0;
+    let totalCard = 0;
+    let totalMixed = 0;
+    let totalRevenue = 0;
+    let totalTransactions = 0;
+
+    // Build unified transaction list
+    const transactions: any[] = [];
+
+    // Process POS payments
+    posPayments.forEach((p) => {
+      const amt = Number(p.amount);
+      totalTransactions++;
+
+      if (p.method === 'CASH') totalCash += amt;
+      else if (p.method === 'UPI') totalUpi += amt;
+      else if (p.method === 'CARD') totalCard += amt;
+      else if (p.method === 'MIXED') {
+        totalMixed += amt;
+        const details = p.details as any;
+        if (details) {
+          totalCash += Number(details.cashAmount || 0);
+          totalUpi += Number(details.upiAmount || 0);
+          totalCard += Number(details.cardAmount || 0);
+        }
+      }
+      totalRevenue += amt;
+
+      transactions.push({
+        id: p.id,
+        source: 'POS',
+        referenceNumber: `#${p.order.orderNumber}`,
+        customerName: p.order.customerName || 'Walk-in Customer',
+        customerPhone: p.order.customerPhone || '',
+        amount: amt,
+        method: p.method,
+        details: p.details,
+        orderType: p.order.type,
+        cashierName: p.order.cashier?.name || 'Unknown',
+        date: p.createdAt,
+      });
+    });
+
+    // Process Game payments
+    gamePayments.forEach((p) => {
+      const amt = Number(p.amount);
+      const method = p.method.toUpperCase();
+      totalTransactions++;
+
+      if (method.includes('CASH')) totalCash += amt;
+      else if (method.includes('UPI')) totalUpi += amt;
+      else if (method.includes('CARD')) totalCard += amt;
+      else if (method.includes('MIXED')) totalMixed += amt;
+      totalRevenue += amt;
+
+      transactions.push({
+        id: p.id,
+        source: 'GAMES',
+        referenceNumber: `GS-${p.session.sessionId}`,
+        customerName: p.session.customer?.name || 'Guest',
+        customerPhone: p.session.customer?.mobile || '',
+        amount: amt,
+        method: method,
+        details: null,
+        orderType: p.session.game?.name || 'Game',
+        cashierName: '-',
+        date: p.date,
+      });
+    });
+
+    // Sort all transactions by date descending
+    transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // Daily breakdown for chart
+    const dailyRevenue: Record<string, { cash: number; upi: number; card: number; total: number }> = {};
+    transactions.forEach((t) => {
+      const dateStr = new Date(t.date).toISOString().split('T')[0];
+      if (!dailyRevenue[dateStr]) {
+        dailyRevenue[dateStr] = { cash: 0, upi: 0, card: 0, total: 0 };
+      }
+      dailyRevenue[dateStr].total += t.amount;
+      const m = t.method.toUpperCase();
+      if (m === 'CASH') dailyRevenue[dateStr].cash += t.amount;
+      else if (m === 'UPI' || m === 'BANK_TRANSFER') dailyRevenue[dateStr].upi += t.amount;
+      else if (m === 'CARD') dailyRevenue[dateStr].card += t.amount;
+      else if (m === 'MIXED') {
+        if (t.details) {
+          dailyRevenue[dateStr].cash += Number(t.details.cashAmount || 0);
+          dailyRevenue[dateStr].upi += Number(t.details.upiAmount || 0);
+          dailyRevenue[dateStr].card += Number(t.details.cardAmount || 0);
+        }
+      }
+    });
+
+    const dailyBreakdown = Object.entries(dailyRevenue)
+      .map(([date, data]) => ({ date, ...data }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Source breakdown
+    const sourceBreakdown = {
+      pos: transactions.filter((t) => t.source === 'POS').reduce((s, t) => s + t.amount, 0),
+      games: transactions.filter((t) => t.source === 'GAMES').reduce((s, t) => s + t.amount, 0),
+    };
+
+    return {
+      kpis: {
+        totalRevenue,
+        totalTransactions,
+        totalCash,
+        totalUpi,
+        totalCard,
+        totalMixed,
+        averageTransactionValue: totalTransactions > 0 ? Number((totalRevenue / totalTransactions).toFixed(2)) : 0,
+      },
+      sourceBreakdown,
+      dailyBreakdown,
+      transactions,
+    };
+  }
+
+  async getAdminDashboardStats(period: 'today' | 'weekly' | 'monthly' = 'today', referenceDateStr?: string) {
+    const ref = referenceDateStr ? new Date(referenceDateStr) : new Date();
+
+    let currentStart: Date;
+    let currentEnd: Date;
+    let prevStart: Date;
+    let prevEnd: Date;
+    let periodLabel = '';
+    const dayKeys: { key: string; label: string; dateStr: string }[] = [];
+
+    const now = new Date();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    if (period === 'today') {
+      currentStart = new Date(ref);
+      currentStart.setHours(0, 0, 0, 0);
+
+      currentEnd = new Date(ref);
+      currentEnd.setHours(23, 59, 59, 999);
+
+      prevStart = new Date(currentStart);
+      prevStart.setDate(currentStart.getDate() - 1);
+      prevStart.setHours(0, 0, 0, 0);
+
+      prevEnd = new Date(prevStart);
+      prevEnd.setHours(23, 59, 59, 999);
+
+      const isToday = currentStart.toDateString() === now.toDateString();
+      const monthStr = currentStart.toLocaleString('default', { month: 'short' });
+      periodLabel = isToday
+        ? `Today, ${monthStr} ${currentStart.getDate()}, ${currentStart.getFullYear()}`
+        : `${monthStr} ${currentStart.getDate()}, ${currentStart.getFullYear()}`;
+
+      // Hourly buckets from 9 AM (09:00) to 10 PM (22:00)
+      const hours = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+      hours.forEach((h) => {
+        const hourLabel = h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
+        dayKeys.push({
+          key: String(h),
+          label: hourLabel,
+          dateStr: String(h),
+        });
+      });
+    } else if (period === 'monthly') {
+      const year = ref.getFullYear();
+      const month = ref.getMonth();
+
+      currentStart = new Date(year, month, 1, 0, 0, 0, 0);
+      currentEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+      prevStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
+      prevEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+      const monthName = currentStart.toLocaleString('default', { month: 'long' });
+      periodLabel = `${monthName} ${year}`;
+
+      const daysInMonth = currentEnd.getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dObj = new Date(year, month, d);
+        const yyyy = dObj.getFullYear();
+        const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(dObj.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+        dayKeys.push({
+          key: String(d),
+          label: `${d}`,
+          dateStr,
+        });
+      }
+    } else {
+      // Weekly (Monday to Sunday)
+      const dayOfWeek = ref.getDay(); // 0 is Sunday, 1 is Monday...
+      const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+
+      currentStart = new Date(ref);
+      currentStart.setDate(ref.getDate() + diffToMonday);
+      currentStart.setHours(0, 0, 0, 0);
+
+      currentEnd = new Date(currentStart);
+      currentEnd.setDate(currentStart.getDate() + 6);
+      currentEnd.setHours(23, 59, 59, 999);
+
+      prevStart = new Date(currentStart);
+      prevStart.setDate(currentStart.getDate() - 7);
+      prevStart.setHours(0, 0, 0, 0);
+
+      prevEnd = new Date(prevStart);
+      prevEnd.setDate(prevStart.getDate() + 6);
+      prevEnd.setHours(23, 59, 59, 999);
+
+      const startMonth = currentStart.toLocaleString('default', { month: 'short' });
+      const endMonth = currentEnd.toLocaleString('default', { month: 'short' });
+      if (startMonth === endMonth) {
+        periodLabel = `${startMonth} ${currentStart.getDate()} – ${currentEnd.getDate()}, ${currentStart.getFullYear()}`;
+      } else {
+        periodLabel = `${startMonth} ${currentStart.getDate()} – ${endMonth} ${currentEnd.getDate()}, ${currentStart.getFullYear()}`;
+      }
+
+      const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      for (let i = 0; i < 7; i++) {
+        const dObj = new Date(currentStart);
+        dObj.setDate(currentStart.getDate() + i);
+        const yyyy = dObj.getFullYear();
+        const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(dObj.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+        dayKeys.push({
+          key: dayNames[i],
+          label: dayNames[i],
+          dateStr,
+        });
+      }
+    }
+
+    // 1. Current Period Orders (Food)
+    const currentOrders = await this.prisma.order.findMany({
+      where: {
+        createdAt: { gte: currentStart, lte: currentEnd },
+        status: OrderStatus.COMPLETED,
+        deletedAt: null,
+      },
+      include: {
+        items: { include: { dish: true } },
+        payments: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // 2. Current Period Game Sessions (Trampoline & Coin Games)
+    const currentSessions = await this.prisma.gameSession.findMany({
+      where: {
+        entryTime: { gte: currentStart, lte: currentEnd },
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      include: {
+        game: true,
+        pricing: true,
+        customer: true,
+        payments: true,
+      },
+      orderBy: { entryTime: 'asc' },
+    });
+
+    // 3. Previous Period for growth calculations
+    const prevOrders = await this.prisma.order.findMany({
+      where: {
+        createdAt: { gte: prevStart, lte: prevEnd },
+        status: OrderStatus.COMPLETED,
+        deletedAt: null,
+      },
+    });
+
+    const prevSessions = await this.prisma.gameSession.findMany({
+      where: {
+        entryTime: { gte: prevStart, lte: prevEnd },
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      include: { game: true, pricing: true },
+    });
+
+    // 4. Today's Data
+    const todayOrders = await this.prisma.order.findMany({
+      where: {
+        createdAt: { gte: todayStart, lte: todayEnd },
+        status: OrderStatus.COMPLETED,
+        deletedAt: null,
+      },
+    });
+
+    const todaySessions = await this.prisma.gameSession.findMany({
+      where: {
+        entryTime: { gte: todayStart, lte: todayEnd },
+      },
+      include: { game: true, pricing: true },
+    });
+
+    const activeSessionsNow = await this.prisma.gameSession.count({
+      where: { status: 'ACTIVE' },
+    });
+
+    // Helpers to classify game sessions
+    const isTrampoline = (s: any) => {
+      const gName = (s.game?.name || '').toLowerCase();
+      const pName = (s.pricing?.name || '').toLowerCase();
+      const notes = (s.notes || '').toLowerCase();
+      if (gName.includes('trampoline') || pName.includes('trampoline') || notes.includes('trampoline')) return true;
+      if (s.adultCount > 0 || s.childCount > 0) return true;
+      return false;
+    };
+
+    // Calculate Current Revenues & Counts
+    const foodRevenue = currentOrders.reduce((sum, o) => sum + Number(o.grandTotal), 0);
+    const foodOrdersCount = currentOrders.length;
+
+    let trampolineRevenue = 0;
+    let trampolineSessionsCount = 0;
+    let trampolineAdults = 0;
+    let trampolineChildren = 0;
+
+    let coinGamesRevenue = 0;
+    let coinGamesTransactionsCount = 0;
+    let totalCoinsSold = 0;
+    const coinPackageBreakdown: Record<string, { name: string; price: number; sales: number; revenue: number }> = {
+      '1_coin': { name: '1 Coin', price: 40, sales: 0, revenue: 0 },
+      '4_coins': { name: '4 Coins', price: 150, sales: 0, revenue: 0 },
+      '10_coins': { name: '10 Coins', price: 350, sales: 0, revenue: 0 },
+      'other': { name: 'Custom Coin Pack', price: 0, sales: 0, revenue: 0 },
+    };
+
+    currentSessions.forEach((s) => {
+      const amt = Number(s.grandTotal || 0);
+      if (isTrampoline(s)) {
+        trampolineRevenue += amt;
+        trampolineSessionsCount += 1;
+        trampolineAdults += s.adultCount || s.guestCount || 1;
+        trampolineChildren += s.childCount || 0;
+      } else {
+        coinGamesRevenue += amt;
+        coinGamesTransactionsCount += 1;
+        const notes = (s.notes || '').toLowerCase();
+        const pName = (s.pricing?.name || '').toLowerCase();
+
+        if (pName.includes('1 coin') || notes.includes('1 coin') || amt === 40) {
+          coinPackageBreakdown['1_coin'].sales += 1;
+          coinPackageBreakdown['1_coin'].revenue += amt;
+          totalCoinsSold += 1;
+        } else if (pName.includes('4 coin') || notes.includes('4 coin') || amt === 150) {
+          coinPackageBreakdown['4_coins'].sales += 1;
+          coinPackageBreakdown['4_coins'].revenue += amt;
+          totalCoinsSold += 4;
+        } else if (pName.includes('10 coin') || notes.includes('10 coin') || amt === 350) {
+          coinPackageBreakdown['10_coins'].sales += 1;
+          coinPackageBreakdown['10_coins'].revenue += amt;
+          totalCoinsSold += 10;
+        } else {
+          const estCoins = Math.max(1, Math.round(amt / 40));
+          coinPackageBreakdown['other'].sales += 1;
+          coinPackageBreakdown['other'].revenue += amt;
+          totalCoinsSold += estCoins;
+        }
+      }
+    });
+
+    const totalRevenue = foodRevenue + trampolineRevenue + coinGamesRevenue;
+    const totalTransactions = foodOrdersCount + trampolineSessionsCount + coinGamesTransactionsCount;
+    const averageTransactionValue = totalTransactions > 0 ? Math.round(totalRevenue / totalTransactions) : 0;
+
+    // Previous Period Calculations
+    const prevFoodRevenue = prevOrders.reduce((sum, o) => sum + Number(o.grandTotal), 0);
+    let prevTrampolineRevenue = 0;
+    let prevCoinGamesRevenue = 0;
+
+    prevSessions.forEach((s) => {
+      const amt = Number(s.grandTotal || 0);
+      if (isTrampoline(s)) {
+        prevTrampolineRevenue += amt;
+      } else {
+        prevCoinGamesRevenue += amt;
+      }
+    });
+
+    const prevTotalRevenue = prevFoodRevenue + prevTrampolineRevenue + prevCoinGamesRevenue;
+
+    const calcChange = (curr: number, prev: number) => {
+      if (prev <= 0) return null;
+      return Number((((curr - prev) / prev) * 100).toFixed(1));
+    };
+
+    const revenueGrowth = {
+      total: calcChange(totalRevenue, prevTotalRevenue),
+      food: calcChange(foodRevenue, prevFoodRevenue),
+      trampoline: calcChange(trampolineRevenue, prevTrampolineRevenue),
+      coinGames: calcChange(coinGamesRevenue, prevCoinGamesRevenue),
+      previousTotalRevenue: prevTotalRevenue,
+    };
+
+    // Percentage Mix
+    const revenueMix = {
+      food: totalRevenue > 0 ? Number(((foodRevenue / totalRevenue) * 100).toFixed(1)) : 0,
+      trampoline: totalRevenue > 0 ? Number(((trampolineRevenue / totalRevenue) * 100).toFixed(1)) : 0,
+      coinGames: totalRevenue > 0 ? Number(((coinGamesRevenue / totalRevenue) * 100).toFixed(1)) : 0,
+    };
+
+    // Daily Timeline Series for Line Chart
+    const dailyMap: Record<string, { food: number; trampoline: number; coinGames: number; total: number; transactions: number }> = {};
+    dayKeys.forEach((d) => {
+      dailyMap[d.dateStr] = { food: 0, trampoline: 0, coinGames: 0, total: 0, transactions: 0 };
+    });
+
+    currentOrders.forEach((o) => {
+      const slotKey = period === 'today' ? String(o.createdAt.getHours()) : o.createdAt.toISOString().split('T')[0];
+      if (dailyMap[slotKey]) {
+        const amt = Number(o.grandTotal);
+        dailyMap[slotKey].food += amt;
+        dailyMap[slotKey].total += amt;
+        dailyMap[slotKey].transactions += 1;
+      }
+    });
+
+    currentSessions.forEach((s) => {
+      const slotKey = period === 'today' ? String(s.entryTime.getHours()) : s.entryTime.toISOString().split('T')[0];
+      if (dailyMap[slotKey]) {
+        const amt = Number(s.grandTotal);
+        if (isTrampoline(s)) {
+          dailyMap[slotKey].trampoline += amt;
+        } else {
+          dailyMap[slotKey].coinGames += amt;
+        }
+        dailyMap[slotKey].total += amt;
+        dailyMap[slotKey].transactions += 1;
+      }
+    });
+
+    const trendSeries = dayKeys.map((dk) => {
+      const val = dailyMap[dk.dateStr] || { food: 0, trampoline: 0, coinGames: 0, total: 0, transactions: 0 };
+      return {
+        key: dk.key,
+        label: dk.label,
+        date: dk.dateStr,
+        food: val.food,
+        trampoline: val.trampoline,
+        coinGames: val.coinGames,
+        total: val.total,
+        transactions: val.transactions,
+      };
+    });
+
+    // Food Item Sales
+    const foodItemMap: Record<string, { name: string; quantity: number; revenue: number }> = {};
+    currentOrders.forEach((o) => {
+      o.items.forEach((item) => {
+        const dId = item.dishId;
+        const dishName = item.dish?.name || 'Item';
+        if (!foodItemMap[dId]) {
+          foodItemMap[dId] = { name: dishName, quantity: 0, revenue: 0 };
+        }
+        foodItemMap[dId].quantity += item.quantity;
+        foodItemMap[dId].revenue += Number(item.price) * item.quantity;
+      });
+    });
+    const topFoodItems = Object.values(foodItemMap)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    // Payment Methods Breakdown
+    const paymentMethods = {
+      cash: 0,
+      upi: 0,
+      mixed: 0,
+      card: 0,
+    };
+
+    currentOrders.forEach((o) => {
+      o.payments.forEach((p) => {
+        const m = (p.method || '').toUpperCase();
+        const amt = Number(p.amount);
+        if (m === 'CASH') paymentMethods.cash += amt;
+        else if (m === 'UPI') paymentMethods.upi += amt;
+        else if (m === 'MIXED') paymentMethods.mixed += amt;
+        else paymentMethods.card += amt;
+      });
+    });
+
+    currentSessions.forEach((s) => {
+      s.payments.forEach((p) => {
+        const m = (p.method || '').toUpperCase();
+        const amt = Number(p.amount);
+        if (m === 'CASH') paymentMethods.cash += amt;
+        else if (m === 'UPI') paymentMethods.upi += amt;
+        else if (m === 'MIXED') paymentMethods.mixed += amt;
+        else paymentMethods.card += amt;
+      });
+    });
+
+    // Today's Operational Stats
+    const todayFoodRev = todayOrders.reduce((sum, o) => sum + Number(o.grandTotal), 0);
+    let todayTrampolineRev = 0;
+    let todayCoinGamesRev = 0;
+    let todayCompletedSessions = 0;
+
+    todaySessions.forEach((s) => {
+      const amt = Number(s.grandTotal);
+      if (isTrampoline(s)) {
+        todayTrampolineRev += amt;
+      } else {
+        todayCoinGamesRev += amt;
+      }
+      if (s.status === 'COMPLETED') {
+        todayCompletedSessions += 1;
+      }
+    });
+
+    const todaySummary = {
+      totalRevenue: todayFoodRev + todayTrampolineRev + todayCoinGamesRev,
+      foodRevenue: todayFoodRev,
+      trampolineRevenue: todayTrampolineRev,
+      coinGamesRevenue: todayCoinGamesRev,
+      transactions: todayOrders.length + todaySessions.length,
+      activeSessions: activeSessionsNow,
+      completedSessions: todayCompletedSessions,
+    };
+
+    // Recent Unified Transactions (Latest 10)
+    const recentTxList: any[] = [];
+    currentOrders.slice(-15).forEach((o) => {
+      const pMethod = o.payments[0]?.method || 'CASH';
+      const itemsDesc = o.items.map((i) => `${i.quantity}x ${i.dish?.name}`).join(', ');
+      recentTxList.push({
+        id: o.id,
+        time: o.createdAt.toISOString(),
+        customer: o.customerName || 'Dine-in Guest',
+        category: 'FOOD',
+        categoryLabel: 'Food',
+        details: itemsDesc || 'Food Order',
+        amount: Number(o.grandTotal),
+        paymentMethod: pMethod,
+        status: o.status,
+      });
+    });
+
+    currentSessions.slice(-15).forEach((s) => {
+      const isTramp = isTrampoline(s);
+      const pMethod = s.payments[0]?.method || 'CASH';
+      const details = isTramp
+        ? `${s.duration || 30} Min (${s.adultCount || s.guestCount || 1} Adult${(s.adultCount || 1) > 1 ? 's' : ''}${s.childCount ? `, ${s.childCount} Child` : ''})`
+        : (s.pricing?.name || s.notes || 'Coin Game Pack');
+
+      recentTxList.push({
+        id: s.id,
+        time: s.entryTime.toISOString(),
+        customer: s.customer?.name || 'Walk-in Guest',
+        category: isTramp ? 'TRAMPOLINE' : 'COIN_GAMES',
+        categoryLabel: isTramp ? 'Trampoline' : 'Coin Games',
+        details,
+        amount: Number(s.grandTotal),
+        paymentMethod: pMethod,
+        status: s.status,
+      });
+    });
+
+    recentTxList.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+    return {
+      period,
+      periodLabel,
+      startDate: currentStart.toISOString(),
+      endDate: currentEnd.toISOString(),
+      kpis: {
+        totalRevenue,
+        foodSales: foodRevenue,
+        trampolineSales: trampolineRevenue,
+        coinGamesSales: coinGamesRevenue,
+        totalTransactions,
+        foodOrdersCount,
+        trampolineSessionsCount,
+        coinGamesTransactionsCount,
+        averageTransactionValue,
+        growth: revenueGrowth,
+        mix: revenueMix,
+      },
+      trendSeries,
+      trampolineAnalytics: {
+        revenue: trampolineRevenue,
+        sessions: trampolineSessionsCount,
+        adults: trampolineAdults,
+        children: trampolineChildren,
+        averageSessionValue: trampolineSessionsCount > 0 ? Math.round(trampolineRevenue / trampolineSessionsCount) : 0,
+      },
+      coinGameAnalytics: {
+        revenue: coinGamesRevenue,
+        transactions: coinGamesTransactionsCount,
+        coinsSold: totalCoinsSold,
+        packages: Object.values(coinPackageBreakdown).filter((p) => p.sales > 0 || p.price > 0),
+      },
+      foodAnalytics: {
+        revenue: foodRevenue,
+        orders: foodOrdersCount,
+        averageOrderValue: foodOrdersCount > 0 ? Math.round(foodRevenue / foodOrdersCount) : 0,
+        topItems: topFoodItems,
+      },
+      paymentMethods,
+      todaySummary,
+      recentTransactions: recentTxList.slice(0, 10),
     };
   }
 }

@@ -21,13 +21,6 @@ async function main() {
   await prisma.gamePricing.deleteMany({});
   await prisma.game.deleteMany({});
 
-  await prisma.partyHallInvoice.deleteMany({});
-  await prisma.partyHallPayment.deleteMany({});
-  await prisma.partyHallService.deleteMany({});
-  await prisma.partyHallBooking.deleteMany({});
-  await prisma.partyHallCustomer.deleteMany({});
-  await prisma.partyHall.deleteMany({});
-
   await prisma.payment.deleteMany({});
   await prisma.orderItem.deleteMany({});
   await prisma.order.deleteMany({});
@@ -79,28 +72,7 @@ async function main() {
   console.log(`- Manager: manager@kyra.com / managerpassword`);
   console.log(`- Cashier: cashier@kyra.com / cashierpassword`);
 
-  // 3. Create Banquet Halls
-  await prisma.partyHall.create({
-    data: {
-      name: 'Grand Ballroom',
-      capacity: 500,
-      baseRent: 50000,
-      description: 'Elegant hall for large weddings and corporate events.',
-    },
-  });
-
-  await prisma.partyHall.create({
-    data: {
-      name: 'Royal Court',
-      capacity: 200,
-      baseRent: 25000,
-      description: 'Premium hall for family gatherings, birthdays, and seminars.',
-    },
-  });
-
-  console.log('Banquet Halls seeded.');
-
-  // 4. Create Games and Pricings
+  // 3. Create Games and Pricings
   const trampoline = await prisma.game.create({
     data: {
       name: 'Trampoline Park',
@@ -157,7 +129,7 @@ async function main() {
 
   console.log('Games and Pricings seeded.');
 
-  // 5. Create Restaurant Tables
+  // 4. Create Restaurant Tables
   await prisma.table.createMany({
     data: [
       { number: 'T-01', capacity: 2 },
@@ -172,7 +144,7 @@ async function main() {
   });
   console.log('Restaurant Tables seeded.');
 
-  // 6. Create Menu Categories & Dishes
+  // 5. Create Menu Categories & Dishes
   const starters = await prisma.category.create({
     data: { name: 'Starters', description: 'Appetizers and quick bites' },
   });

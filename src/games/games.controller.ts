@@ -14,6 +14,8 @@ import {
   CreateSessionDto,
   CloseSessionDto,
   CreatePaymentDto,
+  ValidateOfferDto,
+  CloseGameDayDto,
 } from './dto/games.dto';
 
 @Controller('games')
@@ -21,6 +23,15 @@ import {
 @Roles(Role.ADMIN, Role.MANAGER, Role.CASHIER)
 export class GamesController {
   constructor(private readonly service: GamesService) {}
+
+  // ==========================================
+  // OFFERS / PROMOTIONS
+  // ==========================================
+
+  @Post('offers/validate')
+  async validateOffer(@Body() dto: ValidateOfferDto) {
+    return this.service.validateOffer(dto.code, dto.amount);
+  }
 
   // ==========================================
   // 1. DASHBOARD
@@ -94,6 +105,11 @@ export class GamesController {
     return this.service.getCustomers();
   }
 
+  @Get('customers/lookup')
+  async lookupCustomer(@Query('mobile') mobile: string) {
+    return this.service.lookupCustomerByMobile(mobile);
+  }
+
   @Get('customers/search/:mobile')
   async searchCustomer(@Param('mobile') mobile: string) {
     return this.service.searchCustomer(mobile);
@@ -163,4 +179,24 @@ export class GamesController {
   async getReports(@Query('start') start: string, @Query('end') end: string) {
     return this.service.getReports(start, end);
   }
+
+  // ==========================================
+  // 8. DAY CLOSING & RECONCILIATION
+  // ==========================================
+
+  @Get('day-close/status')
+  async getDayCloseStatus(@Query('date') date?: string) {
+    return this.service.getDayCloseStatus(date);
+  }
+
+  @Post('day-close')
+  async closeGameDay(@CurrentUser() user: any, @Body() dto: CloseGameDayDto) {
+    return this.service.closeGameDay(user, dto);
+  }
+
+  @Get('day-close/history')
+  async getDayCloseHistory() {
+    return this.service.getDayCloseHistory();
+  }
 }
+

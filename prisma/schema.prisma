@@ -72,10 +72,10 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  shifts       Shift[]   @relation("CashierShifts")
-  approvedShifts Shift[] @relation("ApprovedShifts")
-  expenses     Expense[]
-  orders       Order[]
+  shifts         Shift[]   @relation("CashierShifts")
+  approvedShifts Shift[]   @relation("ApprovedShifts")
+  expenses       Expense[]
+  orders         Order[]
 
   @@index([email])
 }
@@ -89,25 +89,25 @@ model Category {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  dishes      Dish[]
+  dishes Dish[]
 }
 
 model Dish {
-  id              String      @id @default(uuid())
-  name            String      @unique
+  id              String    @id @default(uuid())
+  name            String    @unique
   description     String?
-  price           Decimal     @db.Decimal(10, 2)
-  taxRate         Decimal     @default(0.00) @db.Decimal(5, 2)
-  isAvailable     Boolean     @default(true)
-  preparationTime Int         @default(15) // in minutes
+  price           Decimal   @db.Decimal(10, 2)
+  taxRate         Decimal   @default(0.00) @db.Decimal(5, 2)
+  isAvailable     Boolean   @default(true)
+  preparationTime Int       @default(15) // in minutes
   imageUrl        String?
   categoryId      String
   deletedAt       DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  category        Category    @relation(fields: [categoryId], references: [id])
-  orderItems      OrderItem[]
+  category   Category    @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
 
   @@index([categoryId])
 }
@@ -121,64 +121,64 @@ model Table {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  orders    Order[]
+  orders Order[]
 }
 
 model Shift {
-  id                String      @id @default(uuid())
-  cashierId         String
-  openingCash       Decimal     @db.Decimal(10, 2)
-  closingCashSales  Decimal?    @db.Decimal(10, 2)
-  closingCardSales  Decimal?    @db.Decimal(10, 2)
-  closingUpiSales   Decimal?    @db.Decimal(10, 2)
-  closingExpenses   Decimal?    @db.Decimal(10, 2)
-  expectedCash      Decimal?    @db.Decimal(10, 2)
-  actualCash        Decimal?    @db.Decimal(10, 2)
-  cashDifference    Decimal?    @db.Decimal(10, 2)
-  actualUpi         Decimal?    @db.Decimal(10, 2)
-  upiDifference     Decimal?    @db.Decimal(10, 2)
-  openingTime       DateTime    @default(now())
-  closingTime       DateTime?
-  status            ShiftStatus @default(OPEN)
-  approvedById      String?
-  closingNotes      String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id               String      @id @default(uuid())
+  cashierId        String
+  openingCash      Decimal     @db.Decimal(10, 2)
+  closingCashSales Decimal?    @db.Decimal(10, 2)
+  closingCardSales Decimal?    @db.Decimal(10, 2)
+  closingUpiSales  Decimal?    @db.Decimal(10, 2)
+  closingExpenses  Decimal?    @db.Decimal(10, 2)
+  expectedCash     Decimal?    @db.Decimal(10, 2)
+  actualCash       Decimal?    @db.Decimal(10, 2)
+  cashDifference   Decimal?    @db.Decimal(10, 2)
+  actualUpi        Decimal?    @db.Decimal(10, 2)
+  upiDifference    Decimal?    @db.Decimal(10, 2)
+  openingTime      DateTime    @default(now())
+  closingTime      DateTime?
+  status           ShiftStatus @default(OPEN)
+  approvedById     String?
+  closingNotes     String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
-  cashier           User        @relation("CashierShifts", fields: [cashierId], references: [id])
-  approvedBy        User?       @relation("ApprovedShifts", fields: [approvedById], references: [id])
-  orders            Order[]
+  cashier    User    @relation("CashierShifts", fields: [cashierId], references: [id])
+  approvedBy User?   @relation("ApprovedShifts", fields: [approvedById], references: [id])
+  orders     Order[]
 
   @@index([cashierId])
 }
 
 model Order {
-  id            String      @id @default(uuid())
-  orderNumber   Int         @unique @default(autoincrement())
-  tableId       String?
-  cashierId     String
-  shiftId       String
-  status        OrderStatus @default(PENDING)
-  type          OrderType
-  subtotal      Decimal     @db.Decimal(10, 2)
-  taxTotal      Decimal     @db.Decimal(10, 2)
-  discountTotal Decimal     @default(0.00) @db.Decimal(10, 2)
-  grandTotal    Decimal     @db.Decimal(10, 2)
-  customerName  String?
-  customerPhone String?
-  isHeld        Boolean     @default(false)
+  id                 String      @id @default(uuid())
+  orderNumber        Int         @unique @default(autoincrement())
+  tableId            String?
+  cashierId          String
+  shiftId            String
+  status             OrderStatus @default(PENDING)
+  type               OrderType
+  subtotal           Decimal     @db.Decimal(10, 2)
+  taxTotal           Decimal     @db.Decimal(10, 2)
+  discountTotal      Decimal     @default(0.00) @db.Decimal(10, 2)
+  grandTotal         Decimal     @db.Decimal(10, 2)
+  customerName       String?
+  customerPhone      String?
+  isHeld             Boolean     @default(false)
   cancellationReason String?
   cancelledAt        DateTime?
   cancelledByName    String?
-  deletedAt     DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  deletedAt          DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
-  table         Table?      @relation(fields: [tableId], references: [id])
-  cashier       User        @relation(fields: [cashierId], references: [id])
-  shift         Shift       @relation(fields: [shiftId], references: [id])
-  items         OrderItem[]
-  payments      Payment[]
+  table    Table?      @relation(fields: [tableId], references: [id])
+  cashier  User        @relation(fields: [cashierId], references: [id])
+  shift    Shift       @relation(fields: [shiftId], references: [id])
+  items    OrderItem[]
+  payments Payment[]
 
   @@index([tableId])
   @@index([cashierId])
@@ -197,8 +197,8 @@ model OrderItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  dish      Dish     @relation(fields: [dishId], references: [id])
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dish  Dish  @relation(fields: [dishId], references: [id])
 
   @@index([orderId])
   @@index([dishId])
@@ -210,11 +210,11 @@ model Payment {
   amount    Decimal       @db.Decimal(10, 2)
   method    PaymentMethod
   status    PaymentStatus @default(COMPLETED)
-  details   Json?         // To store credit card transaction references, UPI transaction IDs, or Mixed breakdown
+  details   Json? // To store credit card transaction references, UPI transaction IDs, or Mixed breakdown
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
-  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
 }
@@ -229,113 +229,10 @@ model Expense {
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 
-  user      User            @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([category])
-}
-
-model PartyHall {
-  id          String             @id @default(uuid())
-  name        String             @unique
-  capacity    Int
-  baseRent    Decimal            @db.Decimal(10, 2)
-  description String?
-  isActive    Boolean            @default(true)
-  deletedAt   DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  bookings    PartyHallBooking[]
-}
-
-model PartyHallCustomer {
-  id        String             @id @default(uuid())
-  name      String
-  mobile    String             @unique
-  altMobile String?
-  email     String?
-  address   String?
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  bookings  PartyHallBooking[]
-}
-
-model PartyHallBooking {
-  id               String              @id @default(uuid())
-  bookingNumber    Int                 @unique @default(autoincrement())
-  customerId       String
-  hallId           String
-  eventType        String
-  bookingDate      DateTime
-  startTime        String
-  endTime          String
-  guestCount       Int
-  status           String              @default("RESERVED") // RESERVED, BOOKED, CANCELLED
-  hallRent         Decimal             @db.Decimal(10, 2)
-  decorCharges     Decimal             @default(0.00) @db.Decimal(10, 2)
-  foodCharges      Decimal             @default(0.00) @db.Decimal(10, 2)
-  soundCharges     Decimal             @default(0.00) @db.Decimal(10, 2)
-  generatorCharges Decimal             @default(0.00) @db.Decimal(10, 2)
-  cleaningCharges  Decimal             @default(0.00) @db.Decimal(10, 2)
-  extraCharges     Decimal             @default(0.00) @db.Decimal(10, 2)
-  discount         Decimal             @default(0.00) @db.Decimal(10, 2)
-  gst              Decimal             @default(0.00) @db.Decimal(10, 2)
-  grandTotal       Decimal             @db.Decimal(10, 2)
-  notes            String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  customer         PartyHallCustomer   @relation(fields: [customerId], references: [id])
-  hall             PartyHall           @relation(fields: [hallId], references: [id])
-  services         PartyHallService[]
-  payments         PartyHallPayment[]
-  invoices         PartyHallInvoice[]
-
-  @@index([customerId])
-  @@index([hallId])
-}
-
-model PartyHallService {
-  id        String           @id @default(uuid())
-  bookingId String
-  name      String
-  cost      Decimal          @db.Decimal(10, 2)
-  booking   PartyHallBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-
-  @@index([bookingId])
-}
-
-model PartyHallPayment {
-  id        String           @id @default(uuid())
-  bookingId String
-  amount    Decimal          @db.Decimal(10, 2)
-  method    String           // CASH, CARD, UPI, BANK_TRANSFER
-  notes     String?
-  date      DateTime         @default(now())
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  booking   PartyHallBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-
-  @@index([bookingId])
-}
-
-model PartyHallInvoice {
-  id            String           @id @default(uuid())
-  invoiceNumber Int              @unique @default(autoincrement())
-  bookingId     String
-  createdAt     DateTime         @default(now())
-  booking       PartyHallBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-
-  @@index([bookingId])
-}
-
-model PartyHallActivityLog {
-  id        String   @id @default(uuid())
-  userId    String
-  action    String
-  details   String?
-  createdAt DateTime @default(now())
-
-  @@index([userId])
 }
 
 model Game {
@@ -348,32 +245,67 @@ model Game {
   updatedAt   DateTime      @updatedAt
   pricings    GamePricing[]
   sessions    GameSession[]
+  bookings    GameBooking[]
 }
 
 model GamePricing {
   id        String        @id @default(uuid())
   gameId    String
-  name      String        // e.g. "30 Minutes", "60 Minutes", "₹100 Package"
-  duration  Int           // in minutes (0 if package without fixed duration)
+  name      String // e.g. "30 Minutes", "60 Minutes", "₹100 Package"
+  duration  Int // in minutes (0 if package without fixed duration)
   price     Decimal       @db.Decimal(10, 2)
   isActive  Boolean       @default(true)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   game      Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
   sessions  GameSession[]
+  bookings  GameBooking[]
 
   @@index([gameId])
 }
 
 model GameCustomer {
-  id        String        @id @default(uuid())
-  name      String
-  mobile    String        @unique
-  age       Int
-  gender    String        // MALE, FEMALE, OTHER
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  sessions  GameSession[]
+  id           String        @id @default(uuid())
+  customerCode String?       @unique
+  name         String
+  mobile       String        @unique
+  email        String?
+  parentName   String?
+  childName    String?
+  age          Int           @default(0)
+  gender       String        @default("OTHER") // MALE, FEMALE, OTHER
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     GameSession[]
+  bookings     GameBooking[]
+}
+
+model GameBooking {
+  id          String       @id @default(uuid())
+  bookingCode String       @unique // e.g. "BK-9842"
+  customerId  String
+  gameId      String
+  pricingId   String?
+  guestCount  Int          @default(1)
+  adultCount  Int          @default(0)
+  childCount  Int          @default(0)
+  duration    Int          @default(30)
+  unitPrice   Decimal      @db.Decimal(10, 2)
+  totalAmount Decimal      @db.Decimal(10, 2)
+  status      String       @default("CONFIRMED") // CONFIRMED, CHECKED_IN, CANCELLED
+  bookingDate DateTime     @default(now())
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  customer GameCustomer @relation(fields: [customerId], references: [id])
+  game     Game         @relation(fields: [gameId], references: [id])
+  pricing  GamePricing? @relation(fields: [pricingId], references: [id])
+
+  @@index([customerId])
+  @@index([gameId])
+  @@index([bookingCode])
+  @@index([status])
 }
 
 model GameSession {
@@ -381,8 +313,12 @@ model GameSession {
   sessionId      Int               @unique @default(autoincrement())
   customerId     String
   gameId         String
-  pricingId      String
+  pricingId      String?
   guestCount     Int               @default(1)
+  adultCount     Int               @default(0)
+  childCount     Int               @default(0)
+  duration       Int               @default(30) // in minutes (30, 60, 90, 120)
+  offerCode      String?
   entryTime      DateTime          @default(now())
   exitTime       DateTime?
   status         String            @default("ACTIVE") // ACTIVE, COMPLETED, CANCELLED
@@ -392,13 +328,13 @@ model GameSession {
   extraCharges   Decimal           @default(0.00) @db.Decimal(10, 2)
   gst            Decimal           @default(0.00) @db.Decimal(10, 2)
   grandTotal     Decimal           @db.Decimal(10, 2)
-  overrideUser   String?           // Username or ID of the manager who authorized override
+  overrideUser   String? // Username or ID of the manager who authorized override
   overrideReason String?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   customer       GameCustomer      @relation(fields: [customerId], references: [id])
   game           Game              @relation(fields: [gameId], references: [id])
-  pricing        GamePricing       @relation(fields: [pricingId], references: [id])
+  pricing        GamePricing?      @relation(fields: [pricingId], references: [id])
   payments       GamePayment[]
   invoices       GameInvoice[]
   activityLogs   GameActivityLog[]
@@ -412,7 +348,7 @@ model GamePayment {
   id        String      @id @default(uuid())
   sessionId String
   amount    Decimal     @db.Decimal(10, 2)
-  method    String      // CASH, CARD, UPI, BANK_TRANSFER, MIXED
+  method    String // CASH, CARD, UPI, BANK_TRANSFER, MIXED
   notes     String?
   date      DateTime    @default(now())
   createdAt DateTime    @default(now())
@@ -436,11 +372,52 @@ model GameActivityLog {
   id        String       @id @default(uuid())
   userId    String
   sessionId String?
-  action    String       // CREATE_SESSION, CLOSE_SESSION, PRICE_OVERRIDE, etc.
+  action    String // CREATE_SESSION, CLOSE_SESSION, PRICE_OVERRIDE, etc.
   details   String?
   createdAt DateTime     @default(now())
   session   GameSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([sessionId])
+}
+
+model GameDayClose {
+  id                String   @id @default(uuid())
+  date              DateTime // Start of day (00:00:00)
+  dateStr           String   @unique // e.g. "2026-10-02"
+  closedAt          DateTime @default(now())
+  closedById        String
+  closedByName      String
+  totalRevenue      Decimal  @db.Decimal(10, 2)
+  cashSales         Decimal  @db.Decimal(10, 2)
+  upiSales          Decimal  @db.Decimal(10, 2)
+  cardSales         Decimal  @default(0.00) @db.Decimal(10, 2)
+
+  // Trampoline & Coin Breakdown
+  trampCash         Decimal  @default(0.00) @db.Decimal(10, 2)
+  trampUpi          Decimal  @default(0.00) @db.Decimal(10, 2)
+  coinCash          Decimal  @default(0.00) @db.Decimal(10, 2)
+  coinUpi           Decimal  @default(0.00) @db.Decimal(10, 2)
+  otherCash         Decimal  @default(0.00) @db.Decimal(10, 2)
+  otherUpi          Decimal  @default(0.00) @db.Decimal(10, 2)
+
+  actualCash        Decimal  @db.Decimal(10, 2)
+  actualUpi         Decimal  @db.Decimal(10, 2)
+  actualTrampCash   Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualTrampUpi    Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualCoinCash    Decimal? @default(0.00) @db.Decimal(10, 2)
+  actualCoinUpi     Decimal? @default(0.00) @db.Decimal(10, 2)
+
+  cashDifference    Decimal  @db.Decimal(10, 2)
+  upiDifference     Decimal  @db.Decimal(10, 2)
+  totalSessions     Int      @default(0)
+  completedSessions Int      @default(0)
+  activeSessions    Int      @default(0)
+  totalVisitors     Int      @default(0)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([date])
+  @@index([dateStr])
 }

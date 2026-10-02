@@ -63,13 +63,36 @@ export class CreateCustomerDto {
   @IsNotEmpty()
   mobile!: string;
 
-  @IsNumber()
-  @Min(1)
-  age!: number;
+  @IsString()
+  @IsOptional()
+  email?: string;
 
   @IsString()
+  @IsOptional()
+  parentName?: string;
+
+  @IsString()
+  @IsOptional()
+  childName?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  age?: number;
+
+  @IsString()
+  @IsOptional()
+  gender?: string; // MALE, FEMALE, OTHER
+}
+
+export class ValidateOfferDto {
+  @IsString()
   @IsNotEmpty()
-  gender!: string; // MALE, FEMALE, OTHER
+  code!: string;
+
+  @IsNumber()
+  @Min(0)
+  amount!: number;
 }
 
 export class ManagerOverrideDto {
@@ -88,47 +111,118 @@ export class ManagerOverrideDto {
 
 export class CreateSessionDto {
   @IsString()
-  @IsNotEmpty()
-  customerId!: string;
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  gameId!: string;
+  @IsOptional()
+  customerMobile?: string;
 
   @IsString()
-  @IsNotEmpty()
-  pricingId!: string;
+  @IsOptional()
+  customerName?: string;
+
+  @IsString()
+  @IsOptional()
+  customerEmail?: string;
+
+  @IsString()
+  @IsOptional()
+  customerParentName?: string;
+
+  @IsString()
+  @IsOptional()
+  customerChildName?: string;
+
+  @IsString()
+  @IsOptional()
+  gameId?: string;
+
+  @IsString()
+  @IsOptional()
+  pricingId?: string;
+
+  @IsString()
+  @IsOptional()
+  zone?: string;
+
+  @IsString()
+  @IsOptional()
+  coinPackageId?: string;
+
+  @IsOptional()
+  coinQuantities?: Record<string, number>;
 
   @IsNumber()
-  @Min(1)
-  guestCount!: number;
+  @Min(0)
+  @IsOptional()
+  adultCount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  childCount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  guestCount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  duration?: number; // duration in minutes (0 for coin packages, 30, 60, 90, 120 for time-based)
+
+  @IsString()
+  @IsOptional()
+  offerCode?: string;
 
   @IsString()
   @IsOptional()
   notes?: string;
 
-  // Real-time calculations & overrides
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  socksCount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  socksPrice?: number;
+
+  // Real-time calculations & overrides (Manual manager discount)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  manualDiscount?: number;
+
   @IsNumber()
   @Min(0)
   @IsOptional()
   discount?: number;
 
+  // Payments details
+  @IsString()
+  @IsNotEmpty()
+  paymentMethod!: string; // CASH, UPI, CASH_AND_UPI
+
   @IsNumber()
   @Min(0)
   @IsOptional()
-  gst?: number;
+  cashAmount?: number;
 
-  // Payments details
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  upiAmount?: number;
+
   @IsNumber()
   @Min(0)
   @IsOptional()
   amountPaid?: number;
 
-  @IsString()
-  @IsOptional()
-  paymentMethod?: string; // CASH, CARD, UPI, BANK_TRANSFER
-
-  // Manager Override authorization payload if cashier attempts discount
+  // Manager Override authorization payload if cashier attempts manual discount
   @IsOptional()
   overrideAuth?: ManagerOverrideDto;
 }
@@ -167,3 +261,80 @@ export class CreatePaymentDto {
   @IsOptional()
   notes?: string;
 }
+
+export class CloseGameDayDto {
+  @IsString()
+  @IsOptional()
+  date?: string; // YYYY-MM-DD (defaults to today)
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualCash?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualUpi?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualTrampCash?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualTrampUpi?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualCoinCash?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  actualCoinUpi?: number;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
+export class CreatePublicBookingDto {
+  @IsString()
+  @IsNotEmpty()
+  fullName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  mobile!: string;
+
+  @IsString()
+  @IsOptional()
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  gameId?: string;
+
+  @IsString()
+  @IsOptional()
+  pricingId?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  adultCount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  childCount?: number;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+

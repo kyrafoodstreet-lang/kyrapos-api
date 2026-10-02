@@ -11,7 +11,6 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { OrdersModule } from './orders/orders.module';
 import { ReportsModule } from './reports/reports.module';
 import { UsersModule } from './users/users.module';
-import { PartyHallModule } from './party-hall/party-hall.module';
 import { GamesModule } from './games/games.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -33,7 +32,6 @@ import { HealthModule } from './health/health.module';
     OrdersModule,
     ReportsModule,
     UsersModule,
-    PartyHallModule,
     GamesModule,
     HealthModule,
   ],
