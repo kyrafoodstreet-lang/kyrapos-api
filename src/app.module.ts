@@ -15,6 +15,7 @@ import { GamesModule } from './games/games.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { HealthModule } from './health/health.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { HealthModule } from './health/health.module';
     UsersModule,
     GamesModule,
     HealthModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
