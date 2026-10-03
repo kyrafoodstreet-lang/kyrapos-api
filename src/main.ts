@@ -49,7 +49,10 @@ async function bootstrap() {
   );
 
   // Compress response payloads
-  app.use(compression());
+  const compressMiddleware = typeof compression === 'function' ? compression : (compression as any).default;
+  if (typeof compressMiddleware === 'function') {
+    app.use(compressMiddleware());
+  }
 
   // Global Exception filter to clean/sanitize internal errors from client responses
   app.useGlobalFilters(new AllExceptionsFilter());

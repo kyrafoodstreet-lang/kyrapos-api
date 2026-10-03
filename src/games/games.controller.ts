@@ -12,6 +12,7 @@ import {
   UpdatePricingDto,
   CreateCustomerDto,
   CreateSessionDto,
+  CreateCoinSaleDto,
   CloseSessionDto,
   CreatePaymentDto,
   ValidateOfferDto,
@@ -142,6 +143,11 @@ export class GamesController {
   @Post('sessions')
   async startSession(@CurrentUser() user: any, @Body() dto: CreateSessionDto) {
     return this.service.startSession(user.id, user.role, dto);
+  }
+
+  @Post('coin-sales')
+  async sellCoins(@CurrentUser() user: any, @Body() dto: CreateCoinSaleDto) {
+    return this.service.sellCoins(user.id, user.role, dto);
   }
 
   @Put('sessions/:id/close')

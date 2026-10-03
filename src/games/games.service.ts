@@ -8,6 +8,7 @@ import {
   UpdatePricingDto,
   CreateCustomerDto,
   CreateSessionDto,
+  CreateCoinSaleDto,
   CloseSessionDto,
   CreatePaymentDto,
 } from './dto/games.dto';
@@ -325,9 +326,14 @@ export class GamesService {
 
   async getActiveSessions() {
     const list = await this.prisma.gameSession.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        game: {
+          name: { contains: 'Trampoline', mode: 'insensitive' },
+        },
+      },
       include: { customer: true, game: true, pricing: true },
-      orderBy: { entryTime: 'desc' },
+      orderBy: { entryTime: 'asc' },
     });
 
     return list.map((s) => ({
@@ -382,19 +388,14 @@ export class GamesService {
   }
 
   async startSession(cashierId: string, cashierRole: string, dto: CreateSessionDto) {
-    // Resolve Game Zone based on explicit gameId or zone type
+    // Resolve Trampoline Game
     let game = null;
     if (dto.gameId) {
       game = await this.prisma.game.findFirst({
         where: { id: dto.gameId, deletedAt: null },
       });
     }
-    if (!game && (dto.zone === 'COIN_GAME' || dto.zone === 'COIN_GAMES')) {
-      game = await this.prisma.game.findFirst({
-        where: { name: { contains: 'Coin', mode: 'insensitive' }, deletedAt: null },
-      });
-    }
-    if (!game && dto.zone === 'TRAMPOLINE') {
+    if (!game) {
       game = await this.prisma.game.findFirst({
         where: { name: { contains: 'Trampoline', mode: 'insensitive' }, deletedAt: null },
       });
@@ -406,93 +407,24 @@ export class GamesService {
       });
     }
     if (!game) {
-      throw new NotFoundException('Game catalog entry not found');
+      throw new NotFoundException('Trampoline game catalog entry not found');
     }
 
-    const isCoinGame = (dto.zone === 'COIN_GAME' || dto.zone === 'COIN_GAMES' || game.name.toLowerCase().includes('coin'));
-    const isTrampoline = (dto.zone === 'TRAMPOLINE' || game.name.toLowerCase().includes('trampoline'));
-
-    // Resolve Pricing
-    let pricing = null;
-    const targetPricingId = dto.pricingId || dto.coinPackageId;
-    if (targetPricingId && !targetPricingId.startsWith('coin-')) {
-      pricing = await this.prisma.gamePricing.findUnique({
-        where: { id: targetPricingId },
-      });
+    // Trampoline Pricing Business Rules:
+    let adultCount = Number(dto.adultCount ?? 0);
+    let childCount = Number(dto.childCount ?? 0);
+    if (adultCount === 0 && childCount === 0) {
+      adultCount = 1;
     }
+    const totalGuests = Math.max(1, adultCount + childCount);
+    const duration = [30, 60, 90, 120].includes(Number(dto.duration)) ? Number(dto.duration) : 30;
+    const durationMultiplier = duration / 30;
 
-    let adultCount = 0;
-    let childCount = 0;
-    let totalGuests = 1;
-    let duration = 30;
-    let subtotal = 0;
-
-    if (isCoinGame) {
-      // Coin Game Business Rules:
-      // Packages determine amount directly (1 Coin: ₹40, 4 Coins: ₹150, 10 Coins: ₹350)
-      // Supports multi-quantity package selection
-      adultCount = 0;
-      childCount = 0;
-      totalGuests = 1;
-      duration = 0;
-
-      const coinMap: Record<string, number> = {
-        'coin-1': 40,
-        'coin-4': 150,
-        'coin-10': 350,
-      };
-
-      if (dto.coinQuantities && typeof dto.coinQuantities === 'object') {
-        let total = 0;
-        for (const [pkgId, qty] of Object.entries(dto.coinQuantities)) {
-          const count = Number(qty) || 0;
-          if (count > 0) {
-            const price = coinMap[pkgId] || 40;
-            total += price * count;
-          }
-        }
-        subtotal = total > 0 ? total : 40;
-      } else if (pricing) {
-        subtotal = Math.round(Number(pricing.price));
-      } else {
-        const targetKey = dto.coinPackageId || dto.pricingId || 'coin-4';
-        subtotal = coinMap[targetKey] || 150;
-      }
-    } else if (isTrampoline) {
-      // Trampoline Business Rules:
-      adultCount = Number(dto.adultCount ?? 0);
-      childCount = Number(dto.childCount ?? 0);
-      if (adultCount === 0 && childCount === 0) {
-        adultCount = 1;
-      }
-      totalGuests = Math.max(1, adultCount + childCount);
-      duration = [30, 60, 90, 120].includes(Number(dto.duration)) ? Number(dto.duration) : 30;
-      const durationMultiplier = duration / 30;
-
-      let adultRatePer30 = 200;
-      let childRatePer30 = 100;
-      if (pricing && pricing.price) {
-        const pDur = pricing.duration > 0 ? pricing.duration : 30;
-        adultRatePer30 = Number(pricing.price) / (pDur / 30);
-      }
-
-      const adultTotal = adultCount * adultRatePer30 * durationMultiplier;
-      const childTotal = childCount * childRatePer30 * durationMultiplier;
-      subtotal = Math.round(adultTotal + childTotal);
-    } else {
-      // Arcade / Other Zones
-      adultCount = Number(dto.adultCount ?? 0);
-      childCount = Number(dto.childCount ?? 0);
-      totalGuests = Math.max(1, adultCount + childCount || dto.guestCount || 1);
-      duration = dto.duration || (pricing && pricing.duration > 0 ? pricing.duration : 30) || 30;
-
-      if (pricing) {
-        subtotal = Math.round(Number(pricing.price) * totalGuests);
-      } else {
-        const durationMultiplier = duration > 0 ? duration / 30 : 1;
-        subtotal = Math.round(200 * durationMultiplier * totalGuests);
-      }
-    }
+    const adultRatePer30 = 200;
+    const childRatePer30 = 100;
+    const adultTotal = adultCount * adultRatePer30 * durationMultiplier;
+    const childTotal = childCount * childRatePer30 * durationMultiplier;
+    let subtotal = Math.round(adultTotal + childTotal);
 
     // Optional Grip Socks (₹70 per pair)
     const socksCount = Math.max(0, Number(dto.socksCount || 0));
@@ -562,6 +494,9 @@ export class GamesService {
     } else if (method === 'CASH_AND_UPI' || method === 'CASH_UPI' || method === 'MIXED') {
       cashPortion = Number(dto.cashAmount || 0);
       upiPortion = Number(dto.upiAmount || 0);
+      if (cashPortion < 0 || upiPortion < 0) {
+        throw new BadRequestException('Payment amounts cannot be negative');
+      }
       const splitSum = Math.round((cashPortion + upiPortion) * 100) / 100;
       if (Math.abs(splitSum - finalGrandTotal) > 0.01) {
         throw new BadRequestException(
@@ -572,9 +507,8 @@ export class GamesService {
       cashPortion = finalGrandTotal;
     }
 
-    // Atomic Database Transaction
     return this.prisma.$transaction(async (tx) => {
-      // 1. Resolve or Create Customer inside Transaction
+      // Resolve or Create Customer inside Transaction
       let customer = null;
       if (dto.customerId) {
         customer = await tx.gameCustomer.findUnique({
@@ -614,7 +548,6 @@ export class GamesService {
         data: {
           customerId: customer.id,
           gameId: game.id,
-          pricingId: pricing?.id || undefined,
           guestCount: totalGuests,
           adultCount,
           childCount,
@@ -684,10 +617,9 @@ export class GamesService {
           userId: cashierId,
           sessionId: session.id,
           action: 'CREATE_SESSION',
-          details: `Session #${session.sessionId} created for ${customer.name} (${custCodeDisplay}). Adults: ${adultCount}, Children: ${childCount}, Duration: ${duration}m. Paid: ₹${finalGrandTotal} via ${method}.`,
+          details: `Trampoline Session #${session.sessionId} created for ${customer.name} (${custCodeDisplay}). Adults: ${adultCount}, Children: ${childCount}, Duration: ${duration}m. Paid: ₹${finalGrandTotal} via ${method}.`,
         },
       });
-
 
       if (isOverridden) {
         await tx.gameActivityLog.create({
@@ -704,6 +636,215 @@ export class GamesService {
     });
   }
 
+  async sellCoins(cashierId: string, cashierRole: string, dto: CreateCoinSaleDto) {
+    if (!dto.items || !Array.isArray(dto.items) || dto.items.length === 0) {
+      throw new BadRequestException('At least one coin package item must be selected');
+    }
+
+    const packagePriceMap: Record<string, { coins: number; price: number; name: string }> = {
+      'coin-1': { coins: 1, price: 40, name: '1 Token' },
+      'coin-4': { coins: 4, price: 150, name: '4 Tokens' },
+      'coin-10': { coins: 10, price: 350, name: '10 Tokens' },
+    };
+
+    let calculatedTotal = 0;
+    let totalTokens = 0;
+    const itemSummaries: string[] = [];
+
+    for (const item of dto.items) {
+      const pkgInfo = packagePriceMap[item.package];
+      if (!pkgInfo) {
+        throw new BadRequestException(`Invalid coin package identifier: ${item.package}`);
+      }
+      const qty = Number(item.quantity) || 0;
+      if (qty < 0) {
+        throw new BadRequestException('Package quantities cannot be negative');
+      }
+      if (qty > 0) {
+        calculatedTotal += pkgInfo.price * qty;
+        totalTokens += pkgInfo.coins * qty;
+        itemSummaries.push(`${pkgInfo.name} × ${qty}`);
+      }
+    }
+
+    if (calculatedTotal <= 0 || totalTokens <= 0) {
+      throw new BadRequestException('Please select at least 1 coin package with a valid quantity');
+    }
+
+    // Payment validation
+    const method = dto.paymentMethod?.toUpperCase() || 'CASH';
+    let cashPortion = 0;
+    let upiPortion = 0;
+
+    if (method === 'CASH') {
+      cashPortion = calculatedTotal;
+      upiPortion = 0;
+    } else if (method === 'UPI') {
+      cashPortion = 0;
+      upiPortion = calculatedTotal;
+    } else if (method === 'CASH_AND_UPI' || method === 'CASH_UPI' || method === 'MIXED') {
+      cashPortion = Number(dto.cashAmount || 0);
+      upiPortion = Number(dto.upiAmount || 0);
+      if (cashPortion < 0 || upiPortion < 0) {
+        throw new BadRequestException('Payment portions cannot be negative');
+      }
+      const splitSum = Math.round((cashPortion + upiPortion) * 100) / 100;
+      if (Math.abs(splitSum - calculatedTotal) > 0.01) {
+        throw new BadRequestException(
+          `Payment mismatch: Cash (₹${cashPortion}) + UPI (₹${upiPortion}) = ₹${splitSum}, which does not match Total ₹${calculatedTotal}`,
+        );
+      }
+    } else {
+      cashPortion = calculatedTotal;
+    }
+
+    // Resolve Coin Game Game catalog record
+    let coinGame = await this.prisma.game.findFirst({
+      where: { name: { contains: 'Coin', mode: 'insensitive' }, deletedAt: null },
+    });
+    if (!coinGame) {
+      coinGame = await this.prisma.game.findFirst({
+        where: { deletedAt: null },
+      });
+    }
+    if (!coinGame) {
+      throw new NotFoundException('Coin game catalog entry not found');
+    }
+
+    // Atomic transaction for Coin Game Sale
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Resolve or create customer
+      let customer = null;
+      if (dto.customerId) {
+        customer = await tx.gameCustomer.findUnique({
+          where: { id: dto.customerId },
+        });
+      } else if (dto.customerMobile) {
+        const cleanMobile = dto.customerMobile.trim();
+        customer = await tx.gameCustomer.findUnique({
+          where: { mobile: cleanMobile },
+        });
+
+        if (!customer && dto.customerName && dto.customerName.trim()) {
+          const customerCode = await this.generateCustomerCode(tx);
+          customer = await tx.gameCustomer.create({
+            data: {
+              customerCode,
+              name: dto.customerName.trim(),
+              mobile: cleanMobile,
+              email: dto.customerEmail?.trim() || null,
+              age: 0,
+              gender: 'OTHER',
+            } as any,
+          });
+        }
+      }
+
+      // If no customer provided, resolve or create default walk-in guest
+      if (!customer) {
+        customer = await tx.gameCustomer.findFirst({
+          where: { mobile: '0000000000' },
+        });
+        if (!customer) {
+          customer = await tx.gameCustomer.create({
+            data: {
+              customerCode: 'CUST-WALKIN',
+              name: 'Walk-in Guest',
+              mobile: '0000000000',
+              age: 0,
+              gender: 'OTHER',
+            } as any,
+          });
+        }
+      }
+
+      // 2. Create Sale Record (Stored with status COMPLETED so NO active timer, NO active session tracking)
+      const now = new Date();
+      const session = await tx.gameSession.create({
+        data: {
+          customerId: customer.id,
+          gameId: coinGame.id,
+          guestCount: totalTokens,
+          adultCount: 0,
+          childCount: 0,
+          duration: 0,
+          status: 'COMPLETED',
+          entryTime: now,
+          exitTime: now,
+          originalPrice: calculatedTotal,
+          discount: 0,
+          extraCharges: 0,
+          gst: 0,
+          grandTotal: calculatedTotal,
+          notes: `Coin Sale: ${totalTokens} Tokens (${itemSummaries.join(', ')})`,
+        } as any,
+        include: {
+          customer: true,
+          game: true,
+        },
+      });
+
+      // 3. Create Payment Ledger
+      if (calculatedTotal > 0) {
+        if (method === 'CASH_AND_UPI' || method === 'CASH_UPI' || method === 'MIXED') {
+          if (cashPortion > 0) {
+            await tx.gamePayment.create({
+              data: {
+                sessionId: session.id,
+                amount: cashPortion,
+                method: 'CASH',
+                notes: `Coin Sale #${session.sessionId}: Cash portion (${totalTokens} tokens)`,
+                date: now,
+              },
+            });
+          }
+          if (upiPortion > 0) {
+            await tx.gamePayment.create({
+              data: {
+                sessionId: session.id,
+                amount: upiPortion,
+                method: 'UPI',
+                notes: `Coin Sale #${session.sessionId}: UPI portion (${totalTokens} tokens)`,
+                date: now,
+              },
+            });
+          }
+        } else {
+          await tx.gamePayment.create({
+            data: {
+              sessionId: session.id,
+              amount: calculatedTotal,
+              method: method,
+              notes: `Coin Sale #${session.sessionId}: Paid via ${method} (${totalTokens} tokens)`,
+              date: now,
+            },
+          });
+        }
+      }
+
+      // 4. Log Activity
+      await tx.gameActivityLog.create({
+        data: {
+          userId: cashierId,
+          sessionId: session.id,
+          action: 'COIN_SALE',
+          details: `Coin Sale #${session.sessionId} completed for ${customer.name}. ${totalTokens} tokens sold for ₹${calculatedTotal} via ${method}.`,
+        },
+      });
+
+      return {
+        success: true,
+        saleId: session.sessionId,
+        id: session.id,
+        totalTokens,
+        grandTotal: calculatedTotal,
+        totalAmount: calculatedTotal,
+        paymentMethod: method,
+        customer,
+        items: dto.items,
+      };
+    });
+  }
 
   async closeSession(id: string, dto: CloseSessionDto, userId: string) {
     const session = await this.prisma.gameSession.findUnique({
@@ -714,7 +855,7 @@ export class GamesService {
       throw new NotFoundException('Active session not found');
     }
     if (session.status !== 'ACTIVE') {
-      throw new BadRequestException('Session is already closed');
+      throw new BadRequestException('Session is already closed or completed');
     }
 
     const exitTime = new Date();
@@ -743,8 +884,8 @@ export class GamesService {
 
     const prevPaymentsSum = session.payments.reduce((sum, p) => sum + Number(p.amount), 0);
     const subtotal = Number(session.originalPrice) - Number(session.discount) - additionalDiscount + extraCharges;
-    const gstRate = Math.round(subtotal * 0.18); // standard 18% GST recalculate
-    const grandTotal = Math.max(0, subtotal + gstRate);
+    const gstRate = 0; // Zero GST
+    const grandTotal = Math.max(0, subtotal);
     const balanceDue = Math.max(0, grandTotal - prevPaymentsSum);
 
     return this.prisma.$transaction(async (tx) => {

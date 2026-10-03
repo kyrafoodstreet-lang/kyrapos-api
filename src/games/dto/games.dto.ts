@@ -1,4 +1,56 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, IsEnum, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class CoinSaleItemDto {
+  @IsString()
+  @IsNotEmpty()
+  package!: string; // 'coin-1' | 'coin-4' | 'coin-10'
+
+  @IsNumber()
+  @Min(1)
+  quantity!: number;
+}
+
+export class CreateCoinSaleDto {
+  @IsString()
+  @IsOptional()
+  customerId?: string;
+
+  @IsString()
+  @IsOptional()
+  customerMobile?: string;
+
+  @IsString()
+  @IsOptional()
+  customerName?: string;
+
+  @IsString()
+  @IsOptional()
+  customerEmail?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CoinSaleItemDto)
+  items!: CoinSaleItemDto[];
+
+  @IsString()
+  @IsNotEmpty()
+  paymentMethod!: string; // CASH, UPI, CASH_AND_UPI
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  cashAmount?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  upiAmount?: number;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
 
 export class CreateGameDto {
   @IsString()
