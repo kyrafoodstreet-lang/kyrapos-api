@@ -864,22 +864,8 @@ export class GamesService {
     // Calculate actual elapsed minutes
     const actualDuration = Math.max(1, Math.round((exitTime.getTime() - entryTime.getTime()) / 1000 / 60));
 
-    // Overtime Calculations if package has duration
-    const packageDuration = (session as any).pricing?.duration || (session as any).duration || 30;
-    const packagePrice = Number(session.originalPrice);
-    
-    let calculatedExtraCharges = 0;
-    if (packageDuration > 0 && actualDuration > packageDuration) {
-      const overtime = actualDuration - packageDuration;
-      if (overtime > 5) { // 5-minute grace period
-        // Proportional overtime rate calculation
-        const baseRatePerMin = packagePrice / packageDuration;
-        calculatedExtraCharges = Math.round(baseRatePerMin * overtime);
-      }
-    }
-
-    // Cashier can pass custom extra charges (overrides)
-    const extraCharges = dto.extraCharges !== undefined ? dto.extraCharges : calculatedExtraCharges;
+    // Overtime is for visual and operational monitoring only — no automatic surcharge is added to the bill
+    const extraCharges = dto.extraCharges !== undefined ? Number(dto.extraCharges) : 0;
     const additionalDiscount = Number(dto.discount || 0);
 
     const prevPaymentsSum = session.payments.reduce((sum, p) => sum + Number(p.amount), 0);
