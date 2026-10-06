@@ -13,13 +13,13 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get('bills')
-  @Roles(Role.ADMIN, Role.MANAGER)
+  @Roles(Role.ADMIN)
   async getUnifiedBills(@Query() query: QueryBillsDto) {
     return this.adminService.getUnifiedBills(query);
   }
 
   @Get('bills/:type/:id')
-  @Roles(Role.ADMIN, Role.MANAGER)
+  @Roles(Role.ADMIN)
   async getBillDetail(
     @Param('type') type: 'RESTAURANT' | 'TRAMPOLINE' | 'COIN_GAMES',
     @Param('id') id: string,
