@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import {
@@ -14,8 +14,58 @@ import {
 } from './dto/games.dto';
 
 @Injectable()
-export class GamesService {
+export class GamesService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
+
+  async onModuleInit() {
+    await this.ensureTables();
+  }
+
+  async ensureTables() {
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "GameDayClose" (
+          "id" TEXT NOT NULL,
+          "date" TIMESTAMP(3) NOT NULL,
+          "dateStr" TEXT NOT NULL,
+          "closedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "closedById" TEXT NOT NULL,
+          "closedByName" TEXT NOT NULL,
+          "totalRevenue" DECIMAL(10,2) NOT NULL,
+          "cashSales" DECIMAL(10,2) NOT NULL,
+          "upiSales" DECIMAL(10,2) NOT NULL,
+          "cardSales" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "trampCash" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "trampUpi" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "coinCash" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "coinUpi" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "otherCash" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "otherUpi" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+          "actualCash" DECIMAL(10,2) NOT NULL,
+          "actualUpi" DECIMAL(10,2) NOT NULL,
+          "actualTrampCash" DECIMAL(10,2) DEFAULT 0.00,
+          "actualTrampUpi" DECIMAL(10,2) DEFAULT 0.00,
+          "actualCoinCash" DECIMAL(10,2) DEFAULT 0.00,
+          "actualCoinUpi" DECIMAL(10,2) DEFAULT 0.00,
+          "cashDifference" DECIMAL(10,2) NOT NULL,
+          "upiDifference" DECIMAL(10,2) NOT NULL,
+          "totalSessions" INTEGER NOT NULL DEFAULT 0,
+          "completedSessions" INTEGER NOT NULL DEFAULT 0,
+          "activeSessions" INTEGER NOT NULL DEFAULT 0,
+          "totalVisitors" INTEGER NOT NULL DEFAULT 0,
+          "notes" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "GameDayClose_pkey" PRIMARY KEY ("id")
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "GameDayClose_dateStr_key" ON "GameDayClose"("dateStr");
+        CREATE INDEX IF NOT EXISTS "GameDayClose_date_idx" ON "GameDayClose"("date");
+        CREATE INDEX IF NOT EXISTS "GameDayClose_dateStr_idx" ON "GameDayClose"("dateStr");
+      `);
+    } catch (err: any) {
+      console.warn('Auto-ensuring GameDayClose table:', err?.message || err);
+    }
+  }
 
   // ==========================================
   // 1. GAME CATALOG CRUD
@@ -1352,9 +1402,15 @@ export class GamesService {
     const byGame = Object.values(gameBreakdownMap);
 
     // 4. Check if Day is already closed
-    const closingRecord = await (this.prisma as any).gameDayClose.findUnique({
-      where: { dateStr: formattedDateStr },
-    });
+    let closingRecord = null;
+    try {
+      closingRecord = await (this.prisma as any).gameDayClose.findUnique({
+        where: { dateStr: formattedDateStr },
+      });
+    } catch (err: any) {
+      console.warn('GameDayClose table query failed (ensuring table exists):', err?.message || err);
+      await this.ensureTables();
+    }
 
     return {
       date: formattedDateStr,
@@ -1474,6 +1530,8 @@ export class GamesService {
 
     const closedByName = user.name || user.email || 'Staff';
 
+    await this.ensureTables();
+
     // Upsert Day Close Record
     const dayCloseRecord = await (this.prisma as any).gameDayClose.upsert({
       where: { dateStr: formattedDateStr },
@@ -1575,10 +1633,16 @@ export class GamesService {
   }
 
   async getDayCloseHistory() {
-    const list = await (this.prisma as any).gameDayClose.findMany({
-      orderBy: { date: 'desc' },
-      take: 60,
-    });
+    let list: any[] = [];
+    try {
+      list = await (this.prisma as any).gameDayClose.findMany({
+        orderBy: { date: 'desc' },
+        take: 60,
+      });
+    } catch (err: any) {
+      console.warn('GameDayClose history query failed (ensuring table exists):', err?.message || err);
+      await this.ensureTables();
+    }
 
     return list.map((item: any) => ({
       ...item,
